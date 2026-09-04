@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Account — TGN Content Studio{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Account</h1>
+    <div class="page-subtitle">{{ current_user.name }} · {{ current_user.email }} · {{ current_user.role_label }}</div>
+  </div>
+</div>
+
+<div class="card card-pad" style="max-width:420px;">
+  <h3 style="margin-top:0;">Change password</h3>
+  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+  <form method="post">
+    <label class="field-label">Current password</label>
+    <input class="field-input" type="password" name="current_password" required style="margin-bottom:12px;">
+    <label class="field-label">New password</label>
+    <input class="field-input" type="password" name="new_password" required style="margin-bottom:12px;">
+    <label class="field-label">Confirm new password</label>
+    <input class="field-input" type="password" name="confirm_password" required style="margin-bottom:18px;">
+    <button class="btn btn-primary" type="submit">Update password</button>
+  </form>
+</div>
+{% endblock %}

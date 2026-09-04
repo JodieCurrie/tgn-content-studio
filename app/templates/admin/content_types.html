@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Content Types — Admin{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1 class="page-title">Content Types</h1><div class="page-subtitle">The colour-coded key. Each type carries its own colour, defaults, and requirements.</div></div></div>
+
+<table class="admin-table" style="margin-bottom:24px;">
+  <thead><tr><th></th><th>Label</th><th>Filler?</th><th>Needs</th><th>Lead time</th><th></th></tr></thead>
+  <tbody>
+    {% for t in types %}
+    <tr style="opacity:{{ 0.5 if t.archived else 1 }}">
+      <td><span class="color-swatch" style="background:{{ t.color }}"></span></td>
+      <td>{{ t.label }}</td>
+      <td>{{ 'Yes' if t.is_filler else 'No' }}</td>
+      <td>
+        {% if t.requires_videographer %}🎥{% endif %}
+        {% if t.requires_musician %}🎵{% endif %}
+        {% if t.requires_jodie %}👤{% endif %}
+      </td>
+      <td>{{ t.default_lead_time_days }}d</td>
+      <td>
+        <form method="post" action="{{ url_for('admin.content_type_archive', type_id=t.id) }}" style="display:inline;">
+          <button class="btn btn-sm btn-outline" type="submit">{{ 'Restore' if t.archived else 'Archive' }}</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="section-title">Add a new content type</div>
+<div class="card card-pad">
+  <form method="post" action="{{ url_for('admin.content_type_new') }}">
+    <div class="form-grid" style="margin-bottom:12px;">
+      <div><label class="field-label">Key (internal)</label><input class="field-input" name="key" required></div>
+      <div><label class="field-label">Label</label><input class="field-input" name="label" required></div>
+    </div>
+    <div class="form-grid" style="margin-bottom:12px;">
+      <div><label class="field-label">Colour</label><input class="field-input" type="color" name="color" value="#9FA5C9"></div>
+      <div><label class="field-label">Default lead time (days)</label><input class="field-input" type="number" name="default_lead_time_days" value="5"></div>
+    </div>
+    <label class="field-label">Description</label>
+    <textarea class="field-textarea" name="description" style="margin-bottom:12px;"></textarea>
+    <div style="display:flex; gap:16px; margin-bottom:12px; flex-wrap:wrap;">
+      <label class="checkbox-row"><input type="checkbox" name="is_filler" checked> Is filler</label>
+      <label class="checkbox-row"><input type="checkbox" name="requires_videographer"> Needs videographer</label>
+      <label class="checkbox-row"><input type="checkbox" name="requires_musician"> Needs musician</label>
+      <label class="checkbox-row"><input type="checkbox" name="requires_jodie" checked> Needs Jodie</label>
+    </div>
+    <label class="field-label">Default platforms</label>
+    <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
+      {% for p in platforms %}
+      <label class="checkbox-row"><input type="checkbox" name="platforms" value="{{ p.id }}"> {{ p.label }}</label>
+      {% endfor %}
+    </div>
+    <button class="btn btn-primary" type="submit">Add content type</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Home — TGN Content Studio{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Good {{ 'morning' }}, {{ current_user.name.split(' ')[0] }}.</h1>
+    <div class="page-subtitle">TGN this week — {{ summary.week_start|friendly_date_long }} to {{ summary.week_end|friendly_date_long }}</div>
+  </div>
+  <button class="btn btn-primary" id="create-content-btn">+ Create Content</button>
+</div>
+
+<div class="stat-grid">
+  <div class="card stat-card"><div class="stat-num">{{ summary.posts_total }}</div><div class="stat-label">Posts this week</div></div>
+  <div class="card stat-card"><div class="stat-num">{{ summary.posts_published }}</div><div class="stat-label">Published</div></div>
+  <div class="card stat-card"><div class="stat-num">{{ summary.posts_upcoming }}</div><div class="stat-label">Upcoming</div></div>
+  <div class="card stat-card"><div class="stat-num">{{ summary.tasks_due_count }}</div><div class="stat-label">Tasks due</div></div>
+  <div class="card stat-card"><div class="stat-num" style="color:{{ 'var(--danger)' if summary.overdue else 'inherit' }}">{{ summary.overdue|length }}</div><div class="stat-label">Overdue</div></div>
+  <div class="card stat-card"><div class="stat-num">{{ summary.awaiting_approval|length }}</div><div class="stat-label">Awaiting approval</div></div>
+</div>
+
+<div class="two-col">
+  <div>
+    <div class="section-title">Upcoming content</div>
+    <div class="card">
+      {% if upcoming %}
+        {% for o in upcoming %}
+        <div class="list-row" data-campaign-id="{{ o.campaign_id }}">
+          <span class="type-chip" style="background:{{ o.type_color }}55;">{{ o.type_label }}</span>
+          <div style="flex:1;"><strong>{{ o.title }}</strong>
+            <div class="page-subtitle" style="margin:0;">{{ o.publish_date|friendly_date_long }}{% if o.assigned_name %} · {{ o.assigned_name }}{% endif %}</div>
+          </div>
+          <span class="pill">{{ o.status|status_label }}</span>
+        </div>
+        {% endfor %}
+      {% else %}
+      <div class="empty-state">Nothing scheduled yet.</div>
+      {% endif %}
+    </div>
+
+    <div class="section-title">Awaiting your approval</div>
+    <div class="card">
+      {% if summary.awaiting_approval %}
+        {% for c in summary.awaiting_approval %}
+        <div class="list-row" data-campaign-id="{{ c.id }}">
+          <div style="flex:1;"><strong>{{ c.title }}</strong>
+            <div class="page-subtitle" style="margin:0;">{{ c.publish_date|friendly_date_long }}</div>
+          </div>
+          <span class="pill">Awaiting review</span>
+        </div>
+        {% endfor %}
+      {% else %}
+      <div class="empty-state">Nothing waiting on you right now.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div>
+    <div class="section-title">Smart notes</div>
+    <div class="card card-pad">
+      {% for w in summary.warnings %}
+      <div class="warning-item">
+        <span>{{ '⚠️' if w.level == 'warning' else ('✓' if w.level == 'success' else 'ℹ️') }}</span>
+        <span>{{ w.text }}</span>
+      </div>
+      {% endfor %}
+      {% if summary.suggestions %}
+      <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
+        <div class="field-label" style="margin-bottom:6px;">Suggested filler for the gap:</div>
+        {% for s in summary.suggestions %}
+        <span class="type-chip" style="background:{{ s.color }}55; margin-right:6px;">{{ s.label }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="section-title">Content mix this week</div>
+    <div class="card card-pad">
+      {% if summary.mix.total %}
+      <div class="mix-bar">
+        {% for label, info in summary.mix.by_type.items() %}
+        <div style="width:{{ (info.count / summary.mix.total * 100)|round(1) }}%; background:{{ info.color }};" title="{{ label }}: {{ info.count }}"></div>
+        {% endfor %}
+      </div>
+      {% for label, info in summary.mix.by_type.items() %}
+      <div class="legend-item" style="margin-bottom:4px;"><span class="legend-dot" style="background:{{ info.color }}"></span>{{ label }} ({{ info.count }})</div>
+      {% endfor %}
+      {% else %}
+      <div class="empty-state">No content scheduled this week yet.</div>
+      {% endif %}
+    </div>
+
+    <div class="section-title">Team load this week</div>
+    <div class="card">
+      {% for t in summary.team_load %}
+      <div class="list-row" style="cursor:default;">
+        <span class="avatar">{{ t.name|initials }}</span>
+        <div style="flex:1;"><strong>{{ t.name }}</strong> <span class="page-subtitle">{{ t.role_label }}</span></div>
+        <span class="pill">{{ t.due_this_week }} due</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/calendar.js') }}"></script>
+{% endblock %}

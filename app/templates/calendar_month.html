@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ month_name }} {{ year }} — Calendar{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Calendar</h1>
+    <div class="page-subtitle">What are we posting, when, and who's on it.</div>
+  </div>
+  <button class="btn btn-primary" id="create-content-btn">+ Create Content</button>
+</div>
+
+<div class="calendar-toolbar">
+  <a class="btn btn-outline btn-sm" href="{{ url_for('calendar.month_view', year=prev_year, month=prev_month) }}">‹</a>
+  <div class="month-label">{{ month_name }} {{ year }}</div>
+  <a class="btn btn-outline btn-sm" href="{{ url_for('calendar.month_view', year=next_year, month=next_month) }}">›</a>
+  <a class="btn btn-outline btn-sm" href="{{ url_for('calendar.month_view') }}">Today</a>
+</div>
+
+<div class="legend">
+  {% for l in legend %}
+  <div class="legend-item"><span class="legend-dot" style="background:{{ l.color }}"></span>{{ l.label }}</div>
+  {% endfor %}
+</div>
+
+<div class="calendar-grid">
+  {% for wd in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
+    <div class="calendar-weekday-header">{{ wd }}</div>
+  {% endfor %}
+  {% for week in weeks %}
+    {% for day in week %}
+      {% set iso = day.isoformat() %}
+      <div class="calendar-day {{ 'today' if day == today }} {{ 'other-month' if day.month != month }}" data-date="{{ iso }}">
+        <div class="day-number {{ 'is-today' if day == today }}">{{ day.day }}</div>
+        {% for item in by_day.get(iso, []) %}
+        <div class="content-card" draggable="true" data-output-id="{{ item.output_id }}" data-campaign-id="{{ item.campaign_id }}"
+             style="background:{{ item.type_color }}55; border-left-color:{{ item.type_color }};">
+          <span class="cc-type">{{ item.type_label }}</span>
+          <span class="cc-title">{{ item.campaign_title }}</span>
+          <span class="cc-meta">
+            <span class="status-dot status-{{ item.status }}" title="{{ item.status|status_label }}"></span>
+            {% if item.assigned_name %}<span class="avatar" style="width:16px;height:16px;font-size:8px;">{{ item.assigned_name|initials }}</span>{% endif %}
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+    {% endfor %}
+  {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/calendar.js') }}"></script>
+{% endblock %}

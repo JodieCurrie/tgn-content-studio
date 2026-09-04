@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Admin — TGN Content Studio{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1 class="page-title">Admin</h1><div class="page-subtitle">Everything configurable, so this keeps fitting how TGN actually works.</div></div></div>
+<div class="stat-grid">
+  <a class="card stat-card" href="{{ url_for('admin.content_types') }}"><div class="stat-num">{{ counts.content_types }}</div><div class="stat-label">Content types</div></a>
+  <a class="card stat-card" href="{{ url_for('admin.scheduling_rules') }}"><div class="stat-num">{{ counts.rules }}</div><div class="stat-label">Active scheduling rules</div></a>
+  <a class="card stat-card" href="{{ url_for('admin.users') }}"><div class="stat-num">{{ counts.users }}</div><div class="stat-label">Active users</div></a>
+</div>
+{% endblock %}

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}My Tasks — TGN Content Studio{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">{{ 'All Tasks' if scope == 'all' else 'My Tasks' }}</h1>
+    <div class="page-subtitle">Production work, separate from publish dates.</div>
+  </div>
+  {% if current_user.role_is_admin %}
+  <div class="tabs" style="border:none;">
+    <a class="btn btn-sm {{ 'btn-outline' if scope != 'mine' else 'btn-primary' }}" href="{{ url_for('tasks.my_tasks', scope='mine') }}">Mine</a>
+    <a class="btn btn-sm {{ 'btn-outline' if scope != 'all' else 'btn-primary' }}" href="{{ url_for('tasks.my_tasks', scope='all') }}">Everyone</a>
+  </div>
+  {% endif %}
+</div>
+
+{% macro task_row(t) %}
+<div class="list-row" style="cursor:default;" data-task-id="{{ t.id }}">
+  <input type="checkbox" class="js-task-complete" data-task-id="{{ t.id }}" {{ 'checked' if t.status == 'complete' }}>
+  <div style="flex:1;">
+    <strong class="js-open-campaign" style="cursor:pointer;" data-campaign-id="{{ t.campaign_id }}">{{ t.task_name }}</strong> — {{ t.campaign_title }}
+    <div class="page-subtitle" style="margin:0;">{% if t.due_date %}Due {{ t.due_date|friendly_date }}{% else %}No due date{% endif %}{% if t.assigned_name %} · {{ t.assigned_name }}{% endif %}</div>
+  </div>
+  <select class="field-select js-task-status" data-task-id="{{ t.id }}" style="width:auto;">
+    {% for s in ['not_started','in_progress','waiting','submitted','changes_requested','approved','complete'] %}
+    <option value="{{ s }}" {{ 'selected' if t.status == s }}>{{ s|status_label }}</option>
+    {% endfor %}
+  </select>
+</div>
+{% endmacro %}
+
+{% if overdue %}
+<div class="section-title" style="color:var(--danger);">Overdue</div>
+<div class="card">{% for t in overdue %}{{ task_row(t) }}{% endfor %}</div>
+{% endif %}
+
+<div class="section-title">This week</div>
+<div class="card">
+  {% if this_week %}{% for t in this_week %}{{ task_row(t) }}{% endfor %}{% else %}<div class="empty-state">Nothing due this week.</div>{% endif %}
+</div>
+
+<div class="section-title">Later</div>
+<div class="card">
+  {% if later %}{% for t in later %}{{ task_row(t) }}{% endfor %}{% else %}<div class="empty-state">Nothing else on the horizon.</div>{% endif %}
+</div>
+
+{% if done_recently %}
+<div class="section-title">Recently completed</div>
+<div class="card">{% for t in done_recently %}{{ task_row(t) }}{% endfor %}</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/calendar.js') }}"></script>
+{% endblock %}

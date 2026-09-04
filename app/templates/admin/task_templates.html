@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Task Templates — Admin{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1 class="page-title">Task Templates</h1><div class="page-subtitle">Every content type auto-generates these tasks when new content is created.</div></div></div>
+
+{% for t in types %}
+<div class="card card-pad" style="margin-bottom:14px;">
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+    <span class="color-swatch" style="background:{{ t.color }}"></span>
+    <strong>{{ t.label }}</strong>
+  </div>
+  {% for tpl in t.templates %}
+  <div class="list-row" style="cursor:default;">
+    <span class="pill">{{ tpl.role_key }}</span>
+    <div style="flex:1;">{{ tpl.task_name }}</div>
+    <span class="page-subtitle">{{ tpl.offset_days_before }}d before publish</span>
+    <form method="post" action="{{ url_for('admin.task_template_delete', tpl_id=tpl.id) }}">
+      <button class="btn btn-sm btn-ghost" type="submit">✕</button>
+    </form>
+  </div>
+  {% else %}
+  <div class="empty-state" style="padding:12px;">No tasks configured for this type.</div>
+  {% endfor %}
+  <form method="post" action="{{ url_for('admin.task_template_new') }}" style="display:flex; gap:6px; margin-top:10px;">
+    <input type="hidden" name="content_type_id" value="{{ t.id }}">
+    <select class="field-select" name="role_key" style="width:auto;">
+      {% for r in roles %}<option value="{{ r.key }}">{{ r.label }}</option>{% endfor %}
+    </select>
+    <input class="field-input" name="task_name" placeholder="Task name" required style="flex:1;">
+    <input class="field-input" type="number" name="offset_days_before" placeholder="Days before" style="width:100px;" value="3">
+    <button class="btn btn-sm btn-outline" type="submit">Add</button>
+  </form>
+</div>
+{% endfor %}
+{% endblock %}

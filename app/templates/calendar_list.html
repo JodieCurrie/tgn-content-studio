@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}List — TGN Content Studio{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">List View</h1>
+    <div class="page-subtitle">Upcoming content, deadlines, and what's overdue — one flat list.</div>
+  </div>
+  <button class="btn btn-primary" id="create-content-btn">+ Create Content</button>
+</div>
+
+{% if overdue_tasks %}
+<div class="section-title" style="color:var(--danger);">Overdue tasks</div>
+<div class="card">
+  {% for t in overdue_tasks %}
+  <div class="list-row" data-campaign-id="{{ t.campaign_id }}">
+    <span class="status-dot" style="background:var(--danger);"></span>
+    <div style="flex:1;"><strong>{{ t.task_name }}</strong> — {{ t.campaign_title }}
+      <div class="page-subtitle" style="margin:0;">Was due {{ t.due_date|friendly_date }}{% if t.assigned_name %} · {{ t.assigned_name }}{% endif %}</div>
+    </div>
+    <span class="pill">{{ t.status|status_label }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="section-title">Upcoming content (next 60 days)</div>
+<div class="card">
+  {% if upcoming %}
+    {% for o in upcoming %}
+    <div class="list-row" data-campaign-id="{{ o.campaign_id }}">
+      <span class="type-chip" style="background:{{ o.type_color }}55;">{{ o.type_label }}</span>
+      <div style="flex:1;">
+        <strong>{{ o.title }}</strong>
+        <div class="page-subtitle" style="margin:0;">{{ o.publish_date|friendly_date_long }}{% if o.assigned_name %} · {{ o.assigned_name }}{% endif %}</div>
+      </div>
+      <span class="pill">{{ o.status|status_label }}</span>
+    </div>
+    {% endfor %}
+  {% else %}
+  <div class="empty-state">Nothing scheduled yet — click + Create Content to get started.</div>
+  {% endif %}
+</div>
+
+<div class="section-title">Upcoming tasks</div>
+<div class="card">
+  {% if upcoming_tasks %}
+    {% for t in upcoming_tasks %}
+    <div class="list-row" data-campaign-id="{{ t.campaign_id }}">
+      <span class="status-dot status-{{ t.status }}"></span>
+      <div style="flex:1;"><strong>{{ t.task_name }}</strong> — {{ t.campaign_title }}
+        <div class="page-subtitle" style="margin:0;">Due {{ t.due_date|friendly_date }}{% if t.assigned_name %} · {{ t.assigned_name }}{% endif %}</div>
+      </div>
+      <span class="pill">{{ t.status|status_label }}</span>
+    </div>
+    {% endfor %}
+  {% else %}
+  <div class="empty-state">Nothing due.</div>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/calendar.js') }}"></script>
+{% endblock %}

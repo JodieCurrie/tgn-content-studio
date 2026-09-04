@@ -1,0 +1,184 @@
+<div class="panel-header">
+  <button class="panel-close" id="panel-close-btn">✕</button>
+  <span class="type-chip" style="background:{{ c.primary_type_color or '#9FA5C9' }}55;">{{ c.primary_type_label or 'Content' }}</span>
+  <input class="field-input js-autosave" data-campaign-id="{{ c.id }}" data-field="title" value="{{ c.title }}"
+         style="font-size:17px; font-weight:700; border:none; background:transparent; padding:8px 0 0; width:100%;">
+  <div class="page-subtitle">{{ c.publish_date|friendly_date_long }} · Owner: {{ c.owner_name or 'Unassigned' }}</div>
+  {% if c.parent_campaign %}
+  <div class="page-subtitle">Follows: <a href="#" class="js-open-campaign" data-campaign-id="{{ c.parent_campaign.id }}">{{ c.parent_campaign.title }}</a></div>
+  {% endif %}
+</div>
+<div class="panel-body" data-campaign-id="{{ c.id }}">
+
+  <div class="panel-section">
+    <h4>Status &amp; scheduling</h4>
+    <div class="form-grid">
+      <div>
+        <label class="field-label">Status</label>
+        <select class="field-select js-autosave" data-campaign-id="{{ c.id }}" data-field="status">
+          {% for s in ['idea','planned','concept_script','to_film','editing','awaiting_review','changes_requested','approved','scheduled','published','repurposing','complete'] %}
+          <option value="{{ s }}" {{ 'selected' if c.status == s }}>{{ s|status_label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="field-label">Publish date</label>
+        <input class="field-input" type="date" value="{{ c.publish_date }}" id="panel-drag-date" data-campaign-id="{{ c.id }}">
+      </div>
+    </div>
+    {% if c.schedule_origin == 'rule' %}
+    <div class="page-subtitle" style="margin-top:6px;">🔁 Part of a recurring schedule — changing the date here will ask how to apply it.</div>
+    {% elif c.schedule_origin == 'dependent' %}
+    <div class="page-subtitle" style="margin-top:6px;">↳ Auto-created as a follow-up. Moving its parent will move this too.</div>
+    {% endif %}
+  </div>
+
+  {% if c.outputs %}
+  <div class="panel-section">
+    <h4>Outputs ({{ c.outputs|length }})</h4>
+    {% for o in c.outputs %}
+    <div class="card card-pad" style="margin-bottom:8px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span class="type-chip" style="background:{{ o.type_color }}55;">{{ o.type_label }}</span>
+        <span class="page-subtitle">{{ o.publish_date|friendly_date }}</span>
+      </div>
+      <div style="margin-top:6px; font-size:12.5px; color:var(--text-muted);">
+        {% for p in o.platforms %}<span class="pill" style="margin-right:4px;">{{ p.label }}</span>{% endfor %}
+      </div>
+      <div style="margin-top:6px;">
+        <select class="field-select js-output-status" data-output-id="{{ o.id }}" style="width:auto; display:inline-block;">
+          {% for s in ['idea','planned','concept_script','to_film','editing','awaiting_review','changes_requested','approved','scheduled','published','complete'] %}
+          <option value="{{ s }}" {{ 'selected' if o.status == s }}>{{ s|status_label }}</option>
+          {% endfor %}
+        </select>
+        {% if o.assigned_name %}<span class="page-subtitle">Assigned: {{ o.assigned_name }}</span>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="panel-section">
+    <h4>Content / concept</h4>
+    <textarea class="field-textarea js-autosave" data-campaign-id="{{ c.id }}" data-field="concept" placeholder="What is this about?">{{ c.concept }}</textarea>
+  </div>
+
+  <div class="panel-section">
+    <h4>Script / outline</h4>
+    <textarea class="field-textarea js-autosave" data-campaign-id="{{ c.id }}" data-field="script" placeholder="Script or outline...">{{ c.script }}</textarea>
+  </div>
+
+  <div class="panel-section">
+    <h4>Bible references</h4>
+    <input class="field-input js-autosave" data-campaign-id="{{ c.id }}" data-field="bible_references" value="{{ c.bible_references }}" placeholder="e.g. John 3:16, Romans 8:1">
+  </div>
+
+  <div class="panel-section">
+    <h4>Caption</h4>
+    <textarea class="field-textarea js-autosave" data-campaign-id="{{ c.id }}" data-field="caption" placeholder="Social caption...">{{ c.caption }}</textarea>
+  </div>
+
+  <div class="panel-section">
+    <h4>Notes</h4>
+    <textarea class="field-textarea js-autosave" data-campaign-id="{{ c.id }}" data-field="notes" placeholder="General notes...">{{ c.notes }}</textarea>
+  </div>
+
+  <div class="panel-section">
+    <h4>Notes to videographer</h4>
+    <textarea class="field-textarea js-autosave" data-campaign-id="{{ c.id }}" data-field="notes_to_videographer">{{ c.notes_to_videographer }}</textarea>
+  </div>
+
+  <div class="panel-section">
+    <h4>Notes to musician</h4>
+    <textarea class="field-textarea js-autosave" data-campaign-id="{{ c.id }}" data-field="notes_to_musician">{{ c.notes_to_musician }}</textarea>
+  </div>
+
+  <div class="panel-section">
+    <h4>Inspiration links</h4>
+    {% for link in c.inspiration %}
+    <div class="list-row" style="padding:6px 0; cursor:default;">
+      <a href="{{ link.url }}" target="_blank" rel="noopener" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ link.label or link.url }}</a>
+      <button class="btn btn-sm btn-ghost js-delete-inspiration" data-link-id="{{ link.id }}">✕</button>
+    </div>
+    {% endfor %}
+    <form class="js-add-inspiration" data-campaign-id="{{ c.id }}" style="display:flex; gap:6px; margin-top:6px;">
+      <input class="field-input" name="url" placeholder="https://instagram.com/..." style="flex:1;">
+      <button class="btn btn-sm btn-outline" type="submit">Add</button>
+    </form>
+  </div>
+
+  <div class="panel-section">
+    <h4>Attachments</h4>
+    {% for a in c.assets %}
+    <div class="list-row" style="padding:6px 0; cursor:default;">
+      <a href="/uploads/{{ a.stored_path }}" target="_blank">{{ a.filename }}</a>
+      <span class="page-subtitle" style="margin-left:auto;">{{ a.uploaded_by_name or '' }}</span>
+    </div>
+    {% endfor %}
+    <form class="js-upload-asset" data-campaign-id="{{ c.id }}" style="margin-top:6px;">
+      <input type="file" name="file">
+      <button class="btn btn-sm btn-outline" type="submit">Upload</button>
+    </form>
+  </div>
+
+  <div class="panel-section">
+    <h4>Tasks</h4>
+    {% for t in c.tasks %}
+    <div class="list-row" style="padding:7px 0; cursor:default;">
+      <input type="checkbox" class="js-task-complete" data-task-id="{{ t.id }}" {{ 'checked' if t.status == 'complete' }}>
+      <div style="flex:1;">
+        <strong>{{ t.task_name }}</strong>
+        <div class="page-subtitle" style="margin:0;">{{ t.role_key|status_label }}{% if t.due_date %} · Due {{ t.due_date|friendly_date }}{% endif %}{% if t.assigned_name %} · {{ t.assigned_name }}{% endif %}</div>
+      </div>
+      <select class="field-select js-task-status" data-task-id="{{ t.id }}" style="width:auto;">
+        {% for s in ['not_started','in_progress','waiting','submitted','changes_requested','approved','complete'] %}
+        <option value="{{ s }}" {{ 'selected' if t.status == s }}>{{ s|status_label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% else %}
+    <div class="page-subtitle">No tasks generated for this yet.</div>
+    {% endfor %}
+  </div>
+
+  {% if c.dependents %}
+  <div class="panel-section">
+    <h4>Follow-up content</h4>
+    {% for d in c.dependents %}
+    <div class="list-row js-open-campaign" data-campaign-id="{{ d.id }}">
+      <div style="flex:1;"><strong>{{ d.title }}</strong><div class="page-subtitle" style="margin:0;">{{ d.publish_date|friendly_date }}</div></div>
+      <span class="pill">{{ d.status|status_label }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="panel-section">
+    <h4>Comments</h4>
+    {% for cm in c.comments %}
+    <div style="margin-bottom:8px; font-size:13px;">
+      <strong>{{ cm.author_name or 'Someone' }}</strong> <span class="page-subtitle">{{ cm.created_at }}</span>
+      <div>{{ cm.body }}</div>
+    </div>
+    {% endfor %}
+    <form class="js-add-comment" data-campaign-id="{{ c.id }}" style="display:flex; gap:6px; margin-top:6px;">
+      <input class="field-input" name="body" placeholder="Add a comment..." style="flex:1;">
+      <button class="btn btn-sm btn-outline" type="submit">Post</button>
+    </form>
+  </div>
+
+  {% if c.activity %}
+  <div class="panel-section">
+    <h4>Activity</h4>
+    {% for a in c.activity %}
+    <div class="page-subtitle" style="margin-bottom:4px;">{{ a.actor_name or 'System' }} — {{ a.message }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if current_user.role_is_admin %}
+  <div class="panel-section">
+    <button class="btn btn-danger btn-sm js-delete-campaign" data-campaign-id="{{ c.id }}">Delete this content</button>
+  </div>
+  {% endif %}
+</div>

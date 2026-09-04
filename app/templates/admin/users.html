@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Users — Admin{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1 class="page-title">Users</h1><div class="page-subtitle">The team may grow — add anyone here, any role.</div></div></div>
+
+<table class="admin-table" style="margin-bottom:24px;">
+  <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+    {% for u in all_users %}
+    <tr style="opacity:{{ 0.5 if not u.active else 1 }}">
+      <td><span class="avatar">{{ u.name|initials }}</span> {{ u.name }}</td>
+      <td>{{ u.email }}</td>
+      <td>{{ u.role_label }}</td>
+      <td>{{ 'Active' if u.active else 'Inactive' }}</td>
+      <td style="display:flex; gap:6px;">
+        <form method="post" action="{{ url_for('admin.user_toggle_active', user_id=u.id) }}">
+          <button class="btn btn-sm btn-outline" type="submit">{{ 'Deactivate' if u.active else 'Reactivate' }}</button>
+        </form>
+        <form method="post" action="{{ url_for('admin.user_reset_password', user_id=u.id) }}" onsubmit="return confirm('Reset this user\'s password?');">
+          <input type="hidden" name="password" value="TGNwelcome1!">
+          <button class="btn btn-sm btn-ghost" type="submit">Reset password</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="section-title">Add a team member</div>
+<div class="card card-pad">
+  <form method="post" action="{{ url_for('admin.user_new') }}">
+    <div class="form-grid" style="margin-bottom:12px;">
+      <div><label class="field-label">Name</label><input class="field-input" name="name" required></div>
+      <div><label class="field-label">Email</label><input class="field-input" type="email" name="email" required></div>
+    </div>
+    <div class="form-grid" style="margin-bottom:16px;">
+      <div><label class="field-label">Role</label>
+        <select class="field-select" name="role_id">{% for r in roles %}<option value="{{ r.id }}">{{ r.label }}</option>{% endfor %}</select>
+      </div>
+      <div><label class="field-label">Temporary password (optional)</label><input class="field-input" name="password" placeholder="Leave blank for default"></div>
+    </div>
+    <button class="btn btn-primary" type="submit">Add user</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Week of {{ start|friendly_date }} — TGN Content Studio{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">This Week</h1>
+    <div class="page-subtitle">{{ start|friendly_date_long }} – {{ end|friendly_date_long }}</div>
+  </div>
+  <button class="btn btn-primary" id="create-content-btn">+ Create Content</button>
+</div>
+
+<div class="calendar-toolbar">
+  <a class="btn btn-outline btn-sm" href="{{ url_for('calendar.week_view', date=prev_week) }}">‹ Prev</a>
+  <a class="btn btn-outline btn-sm" href="{{ url_for('calendar.week_view') }}">This week</a>
+  <a class="btn btn-outline btn-sm" href="{{ url_for('calendar.week_view', date=next_week) }}">Next ›</a>
+</div>
+
+<div class="week-grid">
+  {% for day in days %}
+  {% set iso = day.isoformat() %}
+  <div class="week-day-col {{ 'today' if day == today }}" data-date="{{ iso }}">
+    <div class="week-day-head">{{ day.strftime('%a %-d') }}</div>
+    {% for item in by_day.get(iso, []) %}
+    <div class="content-card" draggable="true" data-output-id="{{ item.output_id }}" data-campaign-id="{{ item.campaign_id }}"
+         style="background:{{ item.type_color }}55; border-left-color:{{ item.type_color }}; margin-bottom:6px;">
+      <span class="cc-type">{{ item.type_label }}</span>
+      <span class="cc-title">{{ item.campaign_title }}</span>
+      <span class="cc-meta">
+        <span class="status-dot status-{{ item.status }}"></span>
+        {% if item.assigned_name %}<span class="avatar" style="width:16px;height:16px;font-size:8px;">{{ item.assigned_name|initials }}</span>{% endif %}
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+
+<div class="section-title">Tasks due this week</div>
+<div class="card">
+  {% if tasks_this_week %}
+    {% for t in tasks_this_week %}
+    <div class="list-row">
+      <span class="status-dot status-{{ t.status }}"></span>
+      <div style="flex:1;">
+        <strong>{{ t.task_name }}</strong> — {{ t.campaign_title }}
+        <div class="page-subtitle" style="margin:0;">Due {{ t.due_date|friendly_date }}{% if t.assigned_name %} · {{ t.assigned_name }}{% endif %}</div>
+      </div>
+      <span class="pill">{{ t.status|status_label }}</span>
+    </div>
+    {% endfor %}
+  {% else %}
+  <div class="empty-state">Nothing due this week.</div>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/calendar.js') }}"></script>
+{% endblock %}

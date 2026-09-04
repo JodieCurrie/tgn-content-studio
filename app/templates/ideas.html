@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Content Ideas — TGN Content Studio{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">💡 Content Ideas</h1>
+    <div class="page-subtitle">Dump ideas here the moment they occur to you — thinking of content is separate from scheduling it.</div>
+  </div>
+</div>
+
+<div class="card card-pad" style="margin-bottom:18px;">
+  <form id="idea-form" style="display:flex; gap:8px;">
+    <input class="field-input" type="text" id="idea-title" placeholder="e.g. Why does God allow suffering?" style="flex:1;" required>
+    <button class="btn btn-primary" type="submit">Add idea</button>
+  </form>
+</div>
+
+<div class="section-title">Unscheduled ({{ ideas|length }})</div>
+<div class="card">
+  {% if ideas %}
+    {% for i in ideas %}
+    <div class="list-row" style="cursor:default;" data-idea-id="{{ i.id }}">
+      <div style="flex:1;"><strong>{{ i.title }}</strong>
+        {% if i.notes %}<div class="page-subtitle" style="margin:0;">{{ i.notes }}</div>{% endif %}
+      </div>
+      {% if current_user.role_is_admin %}
+      <button class="btn btn-sm btn-outline js-schedule-idea" data-idea-id="{{ i.id }}" data-idea-title="{{ i.title }}">Schedule idea</button>
+      {% endif %}
+      <button class="btn btn-sm btn-ghost js-delete-idea" data-idea-id="{{ i.id }}">✕</button>
+    </div>
+    {% endfor %}
+  {% else %}
+  <div class="empty-state">No ideas waiting — add one above.</div>
+  {% endif %}
+</div>
+
+{% if scheduled %}
+<div class="section-title">Recently scheduled from ideas</div>
+<div class="card">
+  {% for s in scheduled %}
+  <div class="list-row" style="cursor:default;">
+    <div style="flex:1;"><strong>{{ s.title }}</strong> → {{ s.campaign_title }}
+      <div class="page-subtitle" style="margin:0;">{{ s.publish_date|friendly_date_long }}</div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div id="schedule-idea-modal-slot"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+window.TGN_CONTENT_TYPES = {{ content_types|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/ideas.js') }}"></script>
+{% endblock %}

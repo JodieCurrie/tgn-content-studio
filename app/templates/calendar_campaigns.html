@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Campaigns — TGN Content Studio{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Campaigns</h1>
+    <div class="page-subtitle">Every idea and everything it spawned — short video, long video, highlight, follow-ups.</div>
+  </div>
+  <button class="btn btn-primary" id="create-content-btn">+ Create Content</button>
+</div>
+
+{% if campaigns %}
+{% for c in campaigns %}
+<div class="card card-pad" style="margin-bottom:14px;" data-campaign-id="{{ c.id }}">
+  <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+    <div>
+      <strong style="font-size:15px; cursor:pointer;" class="js-open-campaign" data-campaign-id="{{ c.id }}">{{ c.title }}</strong>
+      <div class="page-subtitle" style="margin:2px 0 0;">{{ c.publish_date|friendly_date_long }} · {{ c.type_label or 'Content' }}</div>
+    </div>
+    <span class="pill">{{ c.status|status_label }}</span>
+  </div>
+  {% if c.outputs %}
+  <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;">
+    {% for o in c.outputs %}
+    <span class="type-chip" style="background:{{ o.type_color }}55;">{{ o.type_label }} · {{ o.publish_date|friendly_date }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if c.dependents %}
+  <div class="page-subtitle" style="margin-top:10px;">Follow-ups:</div>
+  <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:4px;">
+    {% for d in c.dependents %}
+    <span class="type-chip js-open-campaign" data-campaign-id="{{ d.id }}" style="background:{{ d.type_color }}55; cursor:pointer;">{{ d.title }} · {{ d.publish_date|friendly_date }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<div class="empty-state">No campaigns yet.</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/calendar.js') }}"></script>
+{% endblock %}

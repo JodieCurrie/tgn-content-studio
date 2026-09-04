@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Create-Content Menu — Admin{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1 class="page-title">+ Create Content Menu</h1><div class="page-subtitle">What shows up when someone clicks "+ Create Content".</div></div></div>
+
+<table class="admin-table" style="margin-bottom:24px;">
+  <thead><tr><th></th><th>Label</th><th>Creates outputs</th><th></th></tr></thead>
+  <tbody>
+    {% for o in options %}
+    <tr style="opacity:{{ 0.5 if o.archived else 1 }}">
+      <td>{{ o.icon }}</td>
+      <td>{{ o.label }}</td>
+      <td>{% for tid in o.output_type_ids %}{% for t in types %}{% if t.id == tid %}<span class="pill" style="margin-right:4px;">{{ t.label }}</span>{% endif %}{% endfor %}{% endfor %}</td>
+      <td>
+        <form method="post" action="{{ url_for('admin.creation_option_archive', option_id=o.id) }}">
+          <button class="btn btn-sm btn-outline" type="submit">{{ 'Restore' if o.archived else 'Archive' }}</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="section-title">Add a menu option</div>
+<div class="card card-pad">
+  <form method="post" action="{{ url_for('admin.creation_option_new') }}">
+    <div class="form-grid" style="margin-bottom:12px;">
+      <div><label class="field-label">Key</label><input class="field-input" name="key" required></div>
+      <div><label class="field-label">Label</label><input class="field-input" name="label" required></div>
+    </div>
+    <label class="field-label">Icon (emoji)</label>
+    <input class="field-input" name="icon" value="✨" style="margin-bottom:12px; width:100px;">
+    <label class="field-label">Creates these content types as outputs</label>
+    <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
+      {% for t in types %}
+      <label class="checkbox-row"><input type="checkbox" name="type_ids" value="{{ t.id }}"> {{ t.label }}</label>
+      {% endfor %}
+    </div>
+    <button class="btn btn-primary" type="submit">Add option</button>
+  </form>
+</div>
+{% endblock %}

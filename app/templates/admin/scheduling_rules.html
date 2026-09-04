@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Scheduling Rules — Admin{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1 class="page-title">Scheduling Rules</h1><div class="page-subtitle">The recurring rhythm — biweekly targeted campaigns, monthly testimony, monthly podcast.</div></div></div>
+
+<table class="admin-table" style="margin-bottom:24px;">
+  <thead><tr><th>Rule</th><th>Type</th><th>Pattern</th><th>Anchor date</th><th></th><th></th></tr></thead>
+  <tbody>
+    {% for r in rules %}
+    <tr style="opacity:{{ 0.5 if not r.active else 1 }}">
+      <td>{{ r.label }}</td>
+      <td><span class="type-chip" style="background:{{ r.type_color }}55;">{{ r.type_label }}</span></td>
+      <td>
+        {% if r.rule_type == 'biweekly' %}Every {{ r.interval_days }} days
+        {% elif r.rule_type == 'monthly_nth_weekday' %}{{ r.nth }}{{ 'st' if r.nth==1 else ('nd' if r.nth==2 else ('rd' if r.nth==3 else 'th')) }} weekday {{ r.weekday }} of month
+        {% elif r.rule_type == 'monthly_last_weekday' %}Last weekday {{ r.weekday }} of month
+        {% endif %}
+      </td>
+      <td>{{ r.anchor_date }}</td>
+      <td>
+        <form method="post" action="{{ url_for('admin.scheduling_rule_toggle', rule_id=r.id) }}">
+          <button class="btn btn-sm btn-outline" type="submit">{{ 'Pause' if r.active else 'Resume' }}</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="{{ url_for('admin.scheduling_rule_delete', rule_id=r.id) }}" onsubmit="return confirm('Delete this rule? Already-generated content stays; future occurrences stop.');">
+          <button class="btn btn-sm btn-ghost" type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="section-title">New rule</div>
+<div class="card card-pad">
+  <form method="post" action="{{ url_for('admin.scheduling_rule_new') }}">
+    <div class="form-grid" style="margin-bottom:12px;">
+      <div><label class="field-label">Label</label><input class="field-input" name="label" required></div>
+      <div><label class="field-label">Content type</label>
+        <select class="field-select" name="content_type_id">{% for t in types %}<option value="{{ t.id }}">{{ t.label }}</option>{% endfor %}</select>
+      </div>
+    </div>
+    <div class="form-grid" style="margin-bottom:12px;">
+      <div><label class="field-label">Pattern</label>
+        <select class="field-select" name="rule_type" id="rule-type-select">
+          <option value="biweekly">Every N days</option>
+          <option value="monthly_nth_weekday">Nth weekday of month</option>
+          <option value="monthly_last_weekday">Last weekday of month</option>
+        </select>
+      </div>
+      <div><label class="field-label">Weekday (0=Mon .. 6=Sun)</label><input class="field-input" type="number" min="0" max="6" name="weekday" value="2" required></div>
+    </div>
+    <div class="form-grid" style="margin-bottom:12px;">
+      <div><label class="field-label">Interval (days, for "every N days")</label><input class="field-input" type="number" name="interval_days" value="14"></div>
+      <div><label class="field-label">Nth (1-4, for "Nth weekday")</label><input class="field-input" type="number" name="nth" min="1" max="4" value="1"></div>
+    </div>
+    <div class="form-grid" style="margin-bottom:12px;">
+      <div><label class="field-label">Anchor date</label><input class="field-input" type="date" name="anchor_date" required></div>
+      <div><label class="field-label">Generate how many weeks ahead</label><input class="field-input" type="number" name="horizon_weeks" value="10"></div>
+    </div>
+    <label class="field-label">Default title for new occurrences</label>
+    <input class="field-input" name="default_title" style="margin-bottom:16px;">
+    <button class="btn btn-primary" type="submit">Create rule</button>
+  </form>
+</div>
+{% endblock %}
