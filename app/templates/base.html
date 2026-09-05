@@ -16,7 +16,6 @@
       <a class="nav-link {{ 'active' if request.endpoint == 'calendar.month_view' }}" href="{{ url_for('calendar.month_view') }}">📅 Calendar</a>
       <a class="nav-link {{ 'active' if request.endpoint == 'calendar.week_view' }}" href="{{ url_for('calendar.week_view') }}">🗓️ Week</a>
       <a class="nav-link {{ 'active' if request.endpoint == 'calendar.list_view' }}" href="{{ url_for('calendar.list_view') }}">📋 List</a>
-      <a class="nav-link {{ 'active' if request.endpoint == 'calendar.campaign_view' }}" href="{{ url_for('calendar.campaign_view') }}">🎯 Campaigns</a>
       <a class="nav-link {{ 'active' if request.endpoint == 'ideas.index' }}" href="{{ url_for('ideas.index') }}">💡 Ideas</a>
       <a class="nav-link {{ 'active' if request.endpoint == 'tasks.my_tasks' }}" href="{{ url_for('tasks.my_tasks') }}">✅ My Tasks</a>
 
@@ -27,6 +26,7 @@
       <a class="nav-link {{ 'active' if request.endpoint == 'admin.scheduling_rules' }}" href="{{ url_for('admin.scheduling_rules') }}">🔁 Scheduling Rules</a>
       <a class="nav-link {{ 'active' if request.endpoint == 'admin.creation_options' }}" href="{{ url_for('admin.creation_options') }}">➕ Create-Content Menu</a>
       <a class="nav-link {{ 'active' if request.endpoint == 'admin.users' }}" href="{{ url_for('admin.users') }}">👥 Users</a>
+      <a class="nav-link {{ 'active' if request.endpoint in ('admin.integrations', 'admin.google_connect', 'admin.google_callback') }}" href="{{ url_for('admin.integrations') }}">🔌 Integrations</a>
       {% endif %}
 
       <div class="sidebar-footer">

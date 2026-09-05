@@ -216,6 +216,26 @@ CREATE TABLE IF NOT EXISTS activity_log (
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- ---------------------------------------------------------------------------
+-- Integration credentials — one row per connected external account
+-- (currently just 'google', authorized once by an admin; used for
+-- Calendar/Meet invites and Drive file storage). Never holds the
+-- client_id/client_secret themselves — those stay in environment
+-- variables — only the per-connection tokens this app was granted.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS integration_credentials (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider        TEXT NOT NULL UNIQUE,      -- 'google'
+    account_email   TEXT,                      -- the Google account that authorized this
+    access_token    TEXT,
+    refresh_token   TEXT,
+    token_expires_at TEXT,                     -- ISO datetime
+    scope           TEXT NOT NULL DEFAULT '',
+    connected_by    INTEGER REFERENCES users(id),
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_campaigns_publish_date ON campaigns(publish_date);
 CREATE INDEX IF NOT EXISTS idx_outputs_campaign ON content_outputs(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_outputs_publish_date ON content_outputs(publish_date);

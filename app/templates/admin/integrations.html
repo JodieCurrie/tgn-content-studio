@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Integrations — Admin{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1 class="page-title">Integrations</h1><div class="page-subtitle">Connect Google so the app can send real calendar/Meet invites and store high-quality files in Drive.</div></div></div>
+
+<div class="card card-pad" style="max-width:640px;">
+  <div class="section-title" style="margin-top:0;">Google (Calendar, Meet &amp; Drive)</div>
+
+  {% if not configured %}
+    <p style="color:var(--text-muted);">
+      The server isn't configured for Google yet — <code>GOOGLE_CLIENT_ID</code>,
+      <code>GOOGLE_CLIENT_SECRET</code> and <code>GOOGLE_REDIRECT_URI</code> need to be
+      set as environment variables first (ask Claude if you haven't done this step yet).
+    </p>
+  {% elif connection %}
+    <p>
+      <span class="badge" style="background:var(--success); color:white;">Connected</span>
+      &nbsp;as <strong>{{ connection.account_email or 'a Google account' }}</strong>
+    </p>
+    <p style="color:var(--text-muted); font-size:13px;">
+      Meeting invites (Concept Hashout, Film/Record) will be created on this account's
+      calendar with Google Meet links, and production files will be stored in this
+      account's Drive and shared with the relevant team member's email.
+    </p>
+    <form method="post" action="{{ url_for('admin.google_disconnect') }}" onsubmit="return confirm('Disconnect the Google account? Calendar invites and Drive uploads will stop working until you reconnect.');">
+      <button class="btn btn-sm btn-outline" type="submit">Disconnect</button>
+    </form>
+  {% else %}
+    <p style="color:var(--text-muted);">
+      Not connected yet. Click below, sign in with the Google account that should own
+      the TGN production calendar and Drive folder, and approve access — this is a
+      one-time step.
+    </p>
+    <a class="btn btn-primary" href="{{ url_for('admin.google_connect') }}">Connect Google Account</a>
+  {% endif %}
+</div>
+{% endblock %}

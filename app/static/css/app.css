@@ -7,9 +7,9 @@
   --border: #E9E1D6;
   --text: #2E2A26;
   --text-muted: #82786C;
-  --accent: #B08BD6;
-  --accent-dark: #8F6BB5;
-  --accent-soft: #F2E9FB;
+  --accent: #FA6E19;
+  --accent-dark: #C2530F;
+  --accent-soft: #FDEBE0;
   --success: #6FAE8A;
   --warning: #E0A857;
   --danger: #D97A86;
@@ -251,7 +251,7 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 .mix-bar { display: flex; height: 10px; border-radius: 999px; overflow: hidden; margin: 10px 0; }
 
 /* ---------------------------------------------------------------- login */
-.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(160deg, #FBF8F4, #F2E9FB); }
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(160deg, #FBF8F4, #FDEBE0); }
 .login-card { width: 380px; max-width: 92vw; padding: 34px 30px; }
 .login-brand { font-size: 22px; font-weight: 800; text-align: center; margin-bottom: 4px; }
 .login-tag { text-align: center; color: var(--text-muted); font-size: 13px; margin-bottom: 24px; }

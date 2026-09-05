@@ -1,8 +1,11 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, g
+import secrets
+
+from flask import Blueprint, render_template, request, redirect, url_for, flash, g, session
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from .. import db
 from ..auth import login_required, admin_required
+from .. import google_integration
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -237,3 +240,68 @@ def creation_option_new():
 def creation_option_archive(option_id):
     db.execute("UPDATE creation_options SET archived = 1 - archived WHERE id = ?", (option_id,))
     return redirect(url_for("admin.creation_options"))
+
+
+# ---------------------------------------------------------------------- integrations (Google)
+@bp.route("/integrations")
+@admin_required
+def integrations():
+    connection = google_integration.get_connection()
+    return render_template(
+        "admin/integrations.html",
+        connection=connection,
+        configured=google_integration.is_configured(),
+    )
+
+
+@bp.route("/google/connect")
+@admin_required
+def google_connect():
+    if not google_integration.is_configured():
+        flash(
+            "Google isn't configured on the server yet — GOOGLE_CLIENT_ID, "
+            "GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI need to be set as "
+            "environment variables first.",
+            "error",
+        )
+        return redirect(url_for("admin.integrations"))
+    state = secrets.token_urlsafe(24)
+    session["google_oauth_state"] = state
+    return redirect(google_integration.build_auth_url(state))
+
+
+@bp.route("/google/callback")
+@admin_required
+def google_callback():
+    error = request.args.get("error")
+    if error:
+        flash(f"Google sign-in was cancelled or failed: {error}", "error")
+        return redirect(url_for("admin.integrations"))
+
+    expected_state = session.pop("google_oauth_state", None)
+    if not expected_state or request.args.get("state") != expected_state:
+        flash("That Google sign-in link expired or was invalid — please try connecting again.", "error")
+        return redirect(url_for("admin.integrations"))
+
+    code = request.args.get("code")
+    if not code:
+        flash("Google didn't return an authorization code — please try again.", "error")
+        return redirect(url_for("admin.integrations"))
+
+    try:
+        tokens = google_integration.exchange_code_for_tokens(code)
+        google_integration.save_new_connection(tokens, connected_by_user_id=g.user["id"])
+    except Exception as e:
+        flash(f"Couldn't finish connecting to Google: {e}", "error")
+        return redirect(url_for("admin.integrations"))
+
+    flash("Google account connected — Calendar and Drive are ready to use.", "success")
+    return redirect(url_for("admin.integrations"))
+
+
+@bp.route("/google/disconnect", methods=["POST"])
+@admin_required
+def google_disconnect():
+    google_integration.disconnect()
+    flash("Disconnected the Google account. Reconnect any time from here.", "success")
+    return redirect(url_for("admin.integrations"))
