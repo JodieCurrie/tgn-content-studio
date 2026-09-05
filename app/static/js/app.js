@@ -65,25 +65,70 @@ function closeModal() {
 modalBackdrop && modalBackdrop.addEventListener("click", (e) => {
   if (e.target === modalBackdrop) closeModal();
 });
+function openCreateModal(prefillDate) {
+  fetch("/content/create-modal").then(r => r.text()).then(html => {
+    openModal(html);
+    if (prefillDate) {
+      const dateInput = document.getElementById("qc-date");
+      if (dateInput) dateInput.value = prefillDate;
+    }
+  });
+}
+
 document.addEventListener("click", (e) => {
   if (e.target.id === "modal-close-btn") closeModal();
-  if (e.target.id === "create-content-btn") {
-    fetch("/content/create-modal").then(r => r.text()).then(openModal);
-  }
+  if (e.target.id === "create-content-btn") openCreateModal();
 });
 
-// type picker inside the create-content modal
+// type picker inside the create-content modal — a plain single-output type
+// (e.g. Targeted Campaign) selects directly; a pick_subtype option (Filler
+// Post / Monthly Campaign — Part 8/9) instead reveals a second "which one
+// specifically?" dropdown and waits for that choice before a real content
+// type is settled on.
+function applyPlatformDefaults(platformIds) {
+  document.querySelectorAll('#qc-platforms input[type=checkbox]').forEach(cb => {
+    cb.checked = platformIds.includes(parseInt(cb.value, 10));
+  });
+}
+
 document.addEventListener("click", (e) => {
   const opt = e.target.closest(".js-type-option");
   if (!opt) return;
   document.querySelectorAll(".js-type-option").forEach(el => el.classList.remove("selected"));
   opt.classList.add("selected");
   document.getElementById("qc-type-key").value = opt.dataset.key;
+
+  const subtypeWrap = document.getElementById("qc-subtype-wrap");
+  const subtypeSelect = document.getElementById("qc-subtype");
+  const contentTypeIdField = document.getElementById("qc-content-type-id");
+
+  let subtypes = [];
+  try { subtypes = JSON.parse(opt.dataset.subtypes || "[]"); } catch (err) {}
+
+  if (opt.dataset.pickSubtype === "1") {
+    subtypeSelect.innerHTML = '<option value="">Choose a type…</option>' +
+      subtypes.map(t => `<option value="${t.id}" data-platforms='${t.default_platform_ids || "[]"}'>${t.label}</option>`).join("");
+    subtypeWrap.style.display = "block";
+    contentTypeIdField.value = "";
+  } else {
+    subtypeWrap.style.display = "none";
+    subtypeSelect.innerHTML = "";
+    contentTypeIdField.value = "";
+    let platformIds = [];
+    try { platformIds = JSON.parse(opt.dataset.platforms || "[]"); } catch (err) {}
+    applyPlatformDefaults(platformIds);
+  }
+});
+
+document.addEventListener("change", (e) => {
+  if (e.target.id !== "qc-subtype") return;
+  const selected = e.target.options[e.target.selectedIndex];
+  document.getElementById("qc-content-type-id").value = e.target.value || "";
   let platformIds = [];
-  try { platformIds = JSON.parse(opt.dataset.platforms || "[]"); } catch (e) {}
-  document.querySelectorAll('#qc-platforms input[type=checkbox]').forEach(cb => {
-    cb.checked = platformIds.includes(parseInt(cb.value, 10));
-  });
+  if (selected && selected.dataset.platforms) {
+    try { platformIds = JSON.parse(selected.dataset.platforms); } catch (err) {}
+  }
+  applyPlatformDefaults(platformIds);
 });
 
 document.addEventListener("submit", async (e) => {
@@ -98,9 +143,17 @@ document.addEventListener("submit", async (e) => {
     errBox.style.display = "block";
     return;
   }
+  const subtypeWrapVisible = document.getElementById("qc-subtype-wrap").style.display !== "none";
+  const contentTypeId = document.getElementById("qc-content-type-id").value;
+  if (subtypeWrapVisible && !contentTypeId) {
+    errBox.textContent = "Choose which specific type this is.";
+    errBox.style.display = "block";
+    return;
+  }
   const platformIds = Array.from(form.querySelectorAll('input[name=platform_ids]:checked')).map(cb => parseInt(cb.value, 10));
   const payload = {
     creation_option_key: typeKey,
+    content_type_id: contentTypeId || null,
     title: document.getElementById("qc-title").value,
     publish_date: document.getElementById("qc-date").value,
     assigned_user_id: document.getElementById("qc-assignee").value || null,

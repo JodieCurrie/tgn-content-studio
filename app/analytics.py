@@ -9,7 +9,10 @@ from . import db
 
 MIN_POSTS_PER_WEEK = 3
 IDEAL_POSTS_PER_WEEK = 4
-VIDEO_TYPE_KEYS = {"targeted_short", "targeted_long", "moving_scripture", "tiktok", "highlight", "quick_reel"}
+VIDEO_TYPE_KEYS = {
+    "targeted_short", "targeted_long", "highlight_1", "highlight_2", "targeted_full_repost",
+    "moving_scripture", "tiktok_style", "quick_reel", "scripture_expansion",
+}
 
 
 def week_bounds(anchor=None):
@@ -74,19 +77,19 @@ def warnings_for_week(anchor=None):
             "text": f"You currently have {max_streak} video posts in a row this week — consider breaking it up with a carousel or static post.",
         })
 
-    # testimony / last-Tuesday sanity check, informational only
+    # testimony / first-Tuesday sanity check, informational only
     testimony_rule = db.query_one("SELECT sr.* FROM scheduling_rules sr JOIN content_types ct ON ct.id = sr.content_type_id WHERE ct.key = 'testimony' AND sr.active = 1")
     if testimony_rule:
         from . import scheduling
-        last_tue = scheduling.last_weekday_of_month(anchor.year if anchor else date.today().year,
-                                                       anchor.month if anchor else date.today().month, 1)
-        has_testimony_this_month = db.query_one(
+        first_tue = scheduling.nth_weekday_of_month(anchor.year if anchor else date.today().year,
+                                                      anchor.month if anchor else date.today().month, 1, 1)
+        has_testimony_this_month = first_tue and db.query_one(
             """SELECT id FROM campaigns WHERE primary_content_type_id = (SELECT id FROM content_types WHERE key='testimony')
                AND publish_date = ?""",
-            (last_tue.isoformat(),),
+            (first_tue.isoformat(),),
         )
         if has_testimony_this_month:
-            warnings.append({"level": "success", "text": f"Testimony scheduled for the last Tuesday of the month ({last_tue.strftime('%-d %b')})."})
+            warnings.append({"level": "success", "text": f"Testimony scheduled for the first Tuesday of the month ({first_tue.strftime('%-d %b')})."})
 
     return warnings
 

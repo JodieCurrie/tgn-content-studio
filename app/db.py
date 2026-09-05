@@ -41,9 +41,33 @@ def init_db(db_path):
     conn.execute("PRAGMA foreign_keys = ON")
     with open(SCHEMA_PATH, "r") as f:
         conn.executescript(f.read())
+    _run_migrations(conn)
     conn.commit()
     conn.close()
     return first_time
+
+
+# New columns added to already-existing tables after the app went live can't
+# just be added to the CREATE TABLE statements above — `CREATE TABLE IF NOT
+# EXISTS` is a no-op once the table already exists in production, so a real
+# migration step is needed here. Each entry is safe to run repeatedly (it
+# checks the column doesn't already exist first) and never touches existing
+# rows/data — it only adds a new, defaulted column alongside them.
+_COLUMN_MIGRATIONS = [
+    ("content_types", "category_key", "TEXT NOT NULL DEFAULT 'targeted'"),
+    ("creation_options", "pick_subtype", "INTEGER NOT NULL DEFAULT 0"),
+    ("scheduling_rules", "interval_months", "INTEGER"),
+]
+
+
+def _column_exists(conn, table, column):
+    return any(row[1] == column for row in conn.execute(f"PRAGMA table_info({table})").fetchall())
+
+
+def _run_migrations(conn):
+    for table, column, coldef in _COLUMN_MIGRATIONS:
+        if not _column_exists(conn, table, column):
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coldef}")
 
 
 def register(app):

@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS content_types (
     default_lead_time_days  INTEGER NOT NULL DEFAULT 5, -- how far before publish work should start
     default_platform_ids    TEXT NOT NULL DEFAULT '[]', -- JSON array of platform ids
     is_campaign_type        INTEGER NOT NULL DEFAULT 0, -- true = spawns multiple outputs (e.g. Targeted Campaign)
+    category_key            TEXT NOT NULL DEFAULT 'targeted', -- 'targeted' | 'filler' | 'monthly' — the 3 big buckets
     sort_order              INTEGER NOT NULL DEFAULT 0,
     archived                INTEGER NOT NULL DEFAULT 0
 );
@@ -56,12 +57,17 @@ CREATE TABLE IF NOT EXISTS content_types (
 -- to one or more content_types that get created as outputs on the new
 -- campaign. Keeping this separate from content_types lets a single quick
 -- pick like "Targeted Campaign" fan out into several coloured outputs.
+-- When pick_subtype = 1 (Filler Post / Monthly Campaign), output_type_ids is
+-- the MENU of choices offered in a second dropdown rather than a fixed set
+-- of outputs to create all at once — the UI submits the one the user picked
+-- as an override (see quick_create in routes/api.py).
 CREATE TABLE IF NOT EXISTS creation_options (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     key             TEXT NOT NULL UNIQUE,
     label           TEXT NOT NULL,
     icon            TEXT NOT NULL DEFAULT '✨',
     output_type_ids TEXT NOT NULL DEFAULT '[]', -- JSON array of content_type ids
+    pick_subtype    INTEGER NOT NULL DEFAULT 0, -- 1 = show a second "which type?" dropdown at creation time
     sort_order      INTEGER NOT NULL DEFAULT 0,
     archived        INTEGER NOT NULL DEFAULT 0
 );
@@ -74,9 +80,11 @@ CREATE TABLE IF NOT EXISTS scheduling_rules (
     label               TEXT NOT NULL,
     content_type_id     INTEGER NOT NULL REFERENCES content_types(id),
     rule_type           TEXT NOT NULL,      -- 'biweekly' | 'monthly_nth_weekday' | 'monthly_last_weekday'
+                                             -- | 'monthly_second_last_weekday' | 'every_n_months_nth_weekday'
     weekday             INTEGER NOT NULL,   -- 0=Mon .. 6=Sun (Python convention)
     interval_days        INTEGER,           -- for 'biweekly'
-    nth                  INTEGER,           -- for 'monthly_nth_weekday' (1..4), ignored for 'last'
+    nth                  INTEGER,           -- for 'monthly_nth_weekday' / 'every_n_months_nth_weekday' (1..4)
+    interval_months       INTEGER,          -- for 'every_n_months_nth_weekday' (e.g. 3 = every 3rd month)
     anchor_date          TEXT NOT NULL,     -- ISO date; the current effective anchor / most recent occurrence
     active               INTEGER NOT NULL DEFAULT 1,
     horizon_weeks        INTEGER NOT NULL DEFAULT 10, -- how far ahead to materialize campaigns

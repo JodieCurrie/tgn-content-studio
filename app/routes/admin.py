@@ -54,6 +54,7 @@ def _save_content_type(type_id):
         label=f["label"].strip(),
         color=f.get("color", "#9FA5C9"),
         description=f.get("description", ""),
+        category_key=f.get("category_key") if f.get("category_key") in CATEGORY_KEYS else "targeted",
         is_filler=1 if f.get("is_filler") else 0,
         requires_videographer=1 if f.get("requires_videographer") else 0,
         requires_musician=1 if f.get("requires_musician") else 0,
@@ -76,6 +77,22 @@ def _save_content_type(type_id):
 @admin_required
 def content_type_archive(type_id):
     db.execute("UPDATE content_types SET archived = 1 - archived WHERE id = ?", (type_id,))
+    return redirect(url_for("admin.content_types"))
+
+
+CATEGORY_KEYS = ("targeted", "filler", "monthly", "custom")
+
+
+@bp.route("/content-types/<int:type_id>/set-category", methods=["POST"])
+@admin_required
+def content_type_set_category(type_id):
+    """Lets Jodie move a content type between Targeted / Filler / Monthly /
+    Custom without touching anything else about it — the category grouping
+    (Part 7/8/9) is meant to stay editable as the team's needs change."""
+    category = request.form.get("category_key")
+    if category in CATEGORY_KEYS:
+        db.execute("UPDATE content_types SET category_key = ? WHERE id = ?", (category, type_id))
+        flash("Category updated.", "success")
     return redirect(url_for("admin.content_types"))
 
 
@@ -133,12 +150,14 @@ def scheduling_rule_new():
     rule_type = f["rule_type"]
     new_id = db.execute(
         """INSERT INTO scheduling_rules
-           (label, content_type_id, rule_type, weekday, interval_days, nth, anchor_date, horizon_weeks, default_title)
-           VALUES (?,?,?,?,?,?,?,?,?)""",
+           (label, content_type_id, rule_type, weekday, interval_days, nth, interval_months,
+            anchor_date, horizon_weeks, default_title)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
         (
             f["label"], int(f["content_type_id"]), rule_type, int(f["weekday"]),
             int(f.get("interval_days") or 14) if rule_type == "biweekly" else None,
-            int(f.get("nth") or 1) if rule_type == "monthly_nth_weekday" else None,
+            int(f.get("nth") or 1) if rule_type in ("monthly_nth_weekday", "every_n_months_nth_weekday") else None,
+            int(f.get("interval_months") or 3) if rule_type == "every_n_months_nth_weekday" else None,
             f["anchor_date"], int(f.get("horizon_weeks") or 10), f.get("default_title", ""),
         ),
     )
@@ -227,9 +246,11 @@ def creation_options():
 def creation_option_new():
     f = request.form
     type_ids = [int(t) for t in request.form.getlist("type_ids")]
+    pick_subtype = 1 if f.get("pick_subtype") else 0
     db.execute(
-        "INSERT INTO creation_options (key, label, icon, output_type_ids, sort_order) VALUES (?,?,?,?,99)",
-        (f["key"].strip().lower().replace(" ", "_"), f["label"].strip(), f.get("icon") or "✨", db.to_json(type_ids)),
+        "INSERT INTO creation_options (key, label, icon, output_type_ids, pick_subtype, sort_order) VALUES (?,?,?,?,?,99)",
+        (f["key"].strip().lower().replace(" ", "_"), f["label"].strip(), f.get("icon") or "✨",
+         db.to_json(type_ids), pick_subtype),
     )
     flash("Create-content option added.", "success")
     return redirect(url_for("admin.creation_options"))

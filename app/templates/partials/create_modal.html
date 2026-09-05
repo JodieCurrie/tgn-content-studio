@@ -7,12 +7,22 @@
     <label class="field-label">What type of content?</label>
     <div class="type-grid">
       {% for o in options %}
-      <div class="type-option js-type-option" data-key="{{ o.key }}" data-platforms="{{ o.types[0].default_platform_ids if o.types else '[]' }}">
+      <div class="type-option js-type-option" data-key="{{ o.key }}" data-pick-subtype="{{ 1 if o.pick_subtype else 0 }}"
+           data-platforms="{{ o.types[0].default_platform_ids if o.types else '[]' }}"
+           data-subtypes='{{ o.types|tojson }}'>
         {{ o.icon }} {{ o.label }}
       </div>
       {% endfor %}
     </div>
     <input type="hidden" name="creation_option_key" id="qc-type-key">
+    <input type="hidden" id="qc-content-type-id">
+
+    <div id="qc-subtype-wrap" style="display:none; margin-bottom:14px;">
+      <label class="field-label">Which one specifically?</label>
+      <select class="field-select" id="qc-subtype">
+        <option value="">Choose a type…</option>
+      </select>
+    </div>
 
     <label class="field-label">What are we posting? (the actual topic — not just the type)</label>
     <input class="field-input" name="title" id="qc-title" placeholder="e.g. Does God really forgive everything?" required style="margin-bottom:14px;">

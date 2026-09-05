@@ -106,3 +106,61 @@ async function commitDrag(campaignId, newDate, mode) {
     window.location.reload();
   }
 }
+
+/* Click an empty date to add content there (Part 2 of the brief) — the
+   click still opens the campaign panel when it lands on an existing card,
+   this only fires on the blank part of a day cell. */
+document.addEventListener("click", (e) => {
+  if (e.target.closest(".content-card")) return;
+  const day = e.target.closest(".calendar-day");
+  if (!day || !day.dataset.date) return;
+  if (typeof openCreateModal === "function") openCreateModal(day.dataset.date);
+});
+
+/* Jump straight to a month/year instead of clicking "next" repeatedly. */
+const calJumpInput = document.getElementById("cal-jump-input");
+calJumpInput && calJumpInput.addEventListener("change", () => {
+  const [y, m] = calJumpInput.value.split("-");
+  if (!y || !m) return;
+  window.location.href = `${window.location.pathname}?year=${y}&month=${parseInt(m, 10)}`;
+});
+
+/* Continuous/infinite-scroll calendar: months bleed into each other in one
+   grid (Part 2) rather than a "click Next Month" page-per-month, and there
+   is no fixed cap on how far ahead this can go — it just keeps fetching
+   /calendar/month-fragment as the sentinel comes into view. */
+const calendarGrid = document.getElementById("calendar-grid");
+const calendarSentinel = document.getElementById("calendar-sentinel");
+const calendarLoading = document.getElementById("calendar-loading");
+let loadingMoreMonths = false;
+
+async function loadNextCalendarMonth() {
+  if (!calendarSentinel || loadingMoreMonths) return;
+  loadingMoreMonths = true;
+  if (calendarLoading) calendarLoading.style.display = "block";
+  const year = calendarSentinel.dataset.nextYear;
+  const month = calendarSentinel.dataset.nextMonth;
+  try {
+    const res = await fetch(`/calendar/month-fragment?year=${year}&month=${month}`);
+    if (res.ok) {
+      const html = await res.text();
+      const wrapper = document.createElement("div");
+      wrapper.innerHTML = html;
+      Array.from(wrapper.children).forEach(node => calendarGrid.appendChild(node));
+      const nextMonthNum = parseInt(month, 10) === 12 ? 1 : parseInt(month, 10) + 1;
+      const nextYearNum = parseInt(month, 10) === 12 ? parseInt(year, 10) + 1 : parseInt(year, 10);
+      calendarSentinel.dataset.nextYear = nextYearNum;
+      calendarSentinel.dataset.nextMonth = nextMonthNum;
+    }
+  } finally {
+    loadingMoreMonths = false;
+    if (calendarLoading) calendarLoading.style.display = "none";
+  }
+}
+
+if (calendarSentinel && "IntersectionObserver" in window) {
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => { if (entry.isIntersecting) loadNextCalendarMonth(); });
+  }, { rootMargin: "600px 0px 600px 0px" });
+  observer.observe(calendarSentinel);
+}

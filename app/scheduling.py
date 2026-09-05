@@ -50,6 +50,20 @@ def last_weekday_of_month(year, month, weekday):
     return d - timedelta(days=delta)
 
 
+def second_last_weekday_of_month(year, month, weekday):
+    """The occurrence of `weekday` one week before the last one in the month
+    (e.g. Blog Post = second-last Thursday of every month). Always still
+    falls inside the same month — the last weekday of a month is never
+    earlier than day (last_day - 6), and every month has at least 28 days,
+    so subtracting 7 days can't cross back into the previous month."""
+    return last_weekday_of_month(year, month, weekday) - timedelta(days=7)
+
+
+def add_months_ym(year, month, delta):
+    total = (year * 12 + (month - 1)) + delta
+    return total // 12, total % 12 + 1
+
+
 def _next_occurrence(rule, after_date):
     """Return the next occurrence strictly after `after_date` (a date object)."""
     if rule["rule_type"] == "biweekly":
@@ -84,6 +98,34 @@ def _next_occurrence(rule, after_date):
             if m > 12:
                 m = 1
                 y += 1
+        return None
+
+    if rule["rule_type"] == "monthly_second_last_weekday":
+        y, m = after_date.year, after_date.month
+        for _ in range(14):
+            occ = second_last_weekday_of_month(y, m, rule["weekday"])
+            if occ > after_date:
+                return occ
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+        return None
+
+    if rule["rule_type"] == "every_n_months_nth_weekday":
+        # Occurrences only fall in months that are a whole number of
+        # `interval_months` cycles away from the anchor month (e.g. the
+        # Podcast Episode's "every 3rd month") — not every month like
+        # 'monthly_nth_weekday' above.
+        interval = rule["interval_months"] or 3
+        anchor = date.fromisoformat(rule["anchor_date"])
+        y, m = anchor.year, anchor.month
+        occ = nth_weekday_of_month(y, m, rule["weekday"], rule["nth"] or 1)
+        for _ in range(60):  # generous cap: 60 cycles is decades out
+            if occ and occ > after_date:
+                return occ
+            y, m = add_months_ym(y, m, interval)
+            occ = nth_weekday_of_month(y, m, rule["weekday"], rule["nth"] or 1)
         return None
 
     return None
@@ -153,21 +195,26 @@ def materialize_all_active_rules():
 
 def get_drag_options(campaign_id):
     """What choices should the UI offer for dragging this campaign?"""
-    c = db.row_to_dict(db.query_one("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)))
+    c = db.row_to_dict(
+        db.query_one(
+            """SELECT c.*, ct.category_key FROM campaigns c
+               LEFT JOIN content_types ct ON ct.id = c.primary_content_type_id
+               WHERE c.id = ?""",
+            (campaign_id,),
+        )
+    )
     if not c:
         return None
-    if c["schedule_origin"] != "rule" or not c["scheduling_rule_id"]:
-        return {"needs_choice": False, "schedule_origin": c["schedule_origin"]}
 
-    dependents = db.query(
-        "SELECT id, title, publish_date FROM campaigns WHERE depends_on_campaign_id = ?",
-        (campaign_id,),
-    )
-    return {
-        "needs_choice": True,
-        "schedule_origin": "rule",
-        "dependents": db.rows_to_list(dependents),
-        "choices": [
+    if c["schedule_origin"] == "rule" and c["scheduling_rule_id"]:
+        rule = db.row_to_dict(
+            db.query_one("SELECT rule_type FROM scheduling_rules WHERE id = ?", (c["scheduling_rule_id"],))
+        )
+        dependents = db.query(
+            "SELECT id, title, publish_date FROM campaigns WHERE depends_on_campaign_id = ?",
+            (campaign_id,),
+        )
+        choices = [
             {
                 "key": "only",
                 "label": "Move this campaign only",
@@ -183,8 +230,49 @@ def get_drag_options(campaign_id):
                 "label": "Shift the recurring schedule from here onward",
                 "description": "This and every future occurrence not already customised move to the new rhythm.",
             },
-        ],
-    }
+        ]
+        # "Push forward" (Part 10) only makes sense for the monthly-style
+        # recurring content, not the biweekly targeted campaign rhythm.
+        if rule and rule["rule_type"] != "biweekly":
+            choices.append({
+                "key": "push_forward",
+                "label": "Push this content type forward",
+                "description": "Skip this occurrence — it moves to the next available slot, and every later "
+                                "occurrence shifts forward one slot too. The schedule keeps going, nothing breaks.",
+            })
+        return {
+            "needs_choice": True,
+            "schedule_origin": "rule",
+            "dependents": db.rows_to_list(dependents),
+            "choices": choices,
+        }
+
+    if c["category_key"] == "filler":
+        later_filler = db.query_one(
+            """SELECT 1 FROM campaigns c2 JOIN content_types ct2 ON ct2.id = c2.primary_content_type_id
+               WHERE ct2.category_key = 'filler' AND c2.publish_date > ? AND c2.id != ? LIMIT 1""",
+            (c["publish_date"], campaign_id),
+        )
+        if later_filler:
+            return {
+                "needs_choice": True,
+                "schedule_origin": "manual",
+                "dependents": [],
+                "choices": [
+                    {
+                        "key": "only",
+                        "label": "Move this post only",
+                        "description": "Just this filler post moves. Everything else stays where it is.",
+                    },
+                    {
+                        "key": "push_all_filler_forward",
+                        "label": "Move this and push all following filler posts forward",
+                        "description": "Every filler post scheduled after this one shifts by the same number of days.",
+                    },
+                ],
+            }
+
+    return {"needs_choice": False, "schedule_origin": c["schedule_origin"]}
 
 
 def apply_drag(campaign_id, new_date_iso, mode, actor_id=None):
@@ -195,7 +283,10 @@ def apply_drag(campaign_id, new_date_iso, mode, actor_id=None):
     old_date = c["publish_date"]
     delta_days = (date.fromisoformat(new_date_iso) - date.fromisoformat(old_date)).days
 
-    if c["schedule_origin"] != "rule" or mode is None:
+    if mode is None:
+        mode = "only"
+    if c["schedule_origin"] != "rule" and mode not in ("only", "push_all_filler_forward"):
+        # rule-only modes requested on a non-rule campaign — fall back safely
         mode = "only"
 
     if mode == "only":
@@ -240,8 +331,77 @@ def apply_drag(campaign_id, new_date_iso, mode, actor_id=None):
             actor_id,
             f"Shifted the recurring schedule: from {old_date} onward now anchors to {new_date_iso}.",
         )
+
+    elif mode == "push_forward":
+        # The dropped date isn't used here — pushing forward means "skip this
+        # slot", not "move to wherever I dropped it"; see push_content_type_forward.
+        push_content_type_forward(campaign_id, actor_id=actor_id)
+
+    elif mode == "push_all_filler_forward":
+        _move_campaign(campaign_id, new_date_iso, delta_days)
+        later = db.query(
+            """SELECT c2.id, c2.publish_date FROM campaigns c2
+               JOIN content_types ct2 ON ct2.id = c2.primary_content_type_id
+               WHERE ct2.category_key = 'filler' AND c2.publish_date > ? AND c2.id != ?
+               ORDER BY c2.publish_date""",
+            (old_date, campaign_id),
+        )
+        for row in later:
+            row_new_date = _add_days(row["publish_date"], delta_days)
+            _move_campaign(row["id"], row_new_date, delta_days)
+        _log(
+            campaign_id, actor_id,
+            f"Moved from {old_date} to {new_date_iso} and pushed {len(later)} later filler post(s) "
+            f"forward by {delta_days:+d} day(s).",
+        )
+
     else:
         raise ValueError(f"Unknown drag mode: {mode}")
+
+
+def push_content_type_forward(campaign_id, actor_id=None):
+    """'Push this content type forward' (Part 10): skip this occurrence —
+    hand its slot to the next one, cascade every later occurrence of the
+    same rule forward by one slot, and extend the chain with a freshly
+    computed date at the end so the horizon doesn't shrink. This is how a
+    recurring monthly item (e.g. this month's Testimony) gets skipped
+    without breaking the rest of the recurring schedule."""
+    c = db.row_to_dict(db.query_one("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)))
+    if not c:
+        raise ValueError("Campaign not found")
+    if c["schedule_origin"] != "rule" or not c["scheduling_rule_id"]:
+        raise ValueError("This isn't part of a recurring schedule.")
+
+    rule = db.row_to_dict(db.query_one("SELECT * FROM scheduling_rules WHERE id = ?", (c["scheduling_rule_id"],)))
+    chain = db.rows_to_list(
+        db.query(
+            """SELECT id, publish_date FROM campaigns
+               WHERE scheduling_rule_id = ? AND publish_date >= ? AND is_rule_exception = 0
+               ORDER BY publish_date""",
+            (rule["id"], c["publish_date"]),
+        )
+    )
+    if not chain:
+        raise ValueError("No upcoming occurrences to push forward.")
+
+    dates = [row["publish_date"] for row in chain]
+    last_date = date.fromisoformat(dates[-1])
+    next_new = _next_occurrence(rule, last_date)
+    if next_new is None:
+        raise ValueError("Couldn't work out the next date in this schedule.")
+    new_dates = dates[1:] + [next_new.isoformat()]
+
+    for row, new_date_for_row in zip(chain, new_dates):
+        delta = (date.fromisoformat(new_date_for_row) - date.fromisoformat(row["publish_date"])).days
+        _move_campaign(row["id"], new_date_for_row, delta)
+        _shift_dependents(row["id"], delta, actor_id)
+
+    _log(
+        campaign_id, actor_id,
+        f"Pushed forward — skipped this slot in the '{rule['label']}' schedule; "
+        f"every later occurrence moved forward one slot to keep the rhythm going.",
+    )
+    return {"new_date": new_dates[0]}
 
 
 def _move_campaign(campaign_id, new_date_iso, delta_days):

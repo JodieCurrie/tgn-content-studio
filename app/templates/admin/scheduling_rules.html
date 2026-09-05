@@ -14,6 +14,8 @@
         {% if r.rule_type == 'biweekly' %}Every {{ r.interval_days }} days
         {% elif r.rule_type == 'monthly_nth_weekday' %}{{ r.nth }}{{ 'st' if r.nth==1 else ('nd' if r.nth==2 else ('rd' if r.nth==3 else 'th')) }} weekday {{ r.weekday }} of month
         {% elif r.rule_type == 'monthly_last_weekday' %}Last weekday {{ r.weekday }} of month
+        {% elif r.rule_type == 'monthly_second_last_weekday' %}Second-last weekday {{ r.weekday }} of month
+        {% elif r.rule_type == 'every_n_months_nth_weekday' %}{{ r.nth }}{{ 'st' if r.nth==1 else ('nd' if r.nth==2 else ('rd' if r.nth==3 else 'th')) }} weekday {{ r.weekday }}, every {{ r.interval_months }} month(s)
         {% endif %}
       </td>
       <td>{{ r.anchor_date }}</td>
@@ -47,13 +49,18 @@
           <option value="biweekly">Every N days</option>
           <option value="monthly_nth_weekday">Nth weekday of month</option>
           <option value="monthly_last_weekday">Last weekday of month</option>
+          <option value="monthly_second_last_weekday">Second-last weekday of month</option>
+          <option value="every_n_months_nth_weekday">Nth weekday, every N months</option>
         </select>
       </div>
       <div><label class="field-label">Weekday (0=Mon .. 6=Sun)</label><input class="field-input" type="number" min="0" max="6" name="weekday" value="2" required></div>
     </div>
     <div class="form-grid" style="margin-bottom:12px;">
       <div><label class="field-label">Interval (days, for "every N days")</label><input class="field-input" type="number" name="interval_days" value="14"></div>
-      <div><label class="field-label">Nth (1-4, for "Nth weekday")</label><input class="field-input" type="number" name="nth" min="1" max="4" value="1"></div>
+      <div><label class="field-label">Nth (1-4, for "Nth weekday" patterns)</label><input class="field-input" type="number" name="nth" min="1" max="4" value="1"></div>
+    </div>
+    <div class="form-grid" style="margin-bottom:12px;">
+      <div><label class="field-label">Interval (months, for "every N months")</label><input class="field-input" type="number" name="interval_months" min="1" value="3"></div>
     </div>
     <div class="form-grid" style="margin-bottom:12px;">
       <div><label class="field-label">Anchor date</label><input class="field-input" type="date" name="anchor_date" required></div>

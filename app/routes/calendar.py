@@ -10,16 +10,19 @@ from .. import analytics
 
 bp = Blueprint("calendar", __name__)
 
+WEEKDAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+MONTHS_PER_INITIAL_LOAD = 3  # how many months render before the user has to scroll
+
 
 def _month_grid(year, month):
-    """Weeks (lists of 7 dates) covering the full calendar month, Mon-first,
+    """Weeks (lists of 7 dates) covering the full calendar month, Sunday-first,
     including the leading/trailing days from neighbouring months so weeks
     stay whole — this is what makes months visually flow into each other."""
     first = date(year, month, 1)
-    start = first - timedelta(days=first.weekday())
+    start = first - timedelta(days=(first.weekday() + 1) % 7)
     last_day = pycal.monthrange(year, month)[1]
     last = date(year, month, last_day)
-    end = last + timedelta(days=(6 - last.weekday()))
+    end = last + timedelta(days=(5 - last.weekday()) % 7)
 
     weeks = []
     cursor = start
@@ -28,6 +31,23 @@ def _month_grid(year, month):
         weeks.append(week)
         cursor += timedelta(days=7)
     return weeks, start, end
+
+
+def _add_months(year, month, delta):
+    """(year, month) shifted by delta months — no artificial bound in either
+    direction, which is what lets the calendar scroll indefinitely instead
+    of stopping after some fixed number of months."""
+    total = (year * 12 + (month - 1)) + delta
+    return total // 12, total % 12 + 1
+
+
+def _build_month_block(year, month):
+    weeks, start, end = _month_grid(year, month)
+    by_day = _outputs_by_day(start, end)
+    return {
+        "year": year, "month": month, "month_name": pycal.month_name[month],
+        "weeks": weeks, "by_day": by_day,
+    }
 
 
 def _outputs_by_day(start, end):
@@ -57,16 +77,20 @@ def _outputs_by_day(start, end):
 @bp.route("/calendar")
 @login_required
 def month_view():
+    """The calendar (Part 2 of the brief): a single continuous, Sunday-first
+    grid — not a page-per-month. This renders a starting window of a few
+    months; calendar.js extends it further as the user scrolls, fetching
+    more from /calendar/month-fragment, with no fixed cap on how far ahead
+    that can go."""
     today = date.today()
     year = request.args.get("year", type=int) or today.year
     month = request.args.get("month", type=int) or today.month
-    weeks, start, end = _month_grid(year, month)
-    by_day = _outputs_by_day(start, end)
 
-    prev_month = month - 1 or 12
-    prev_year = year if month > 1 else year - 1
-    next_month = month + 1 if month < 12 else 1
-    next_year = year if month < 12 else year + 1
+    month_blocks = [
+        _build_month_block(*_add_months(year, month, i))
+        for i in range(MONTHS_PER_INITIAL_LOAD)
+    ]
+    sentinel_year, sentinel_month = _add_months(year, month, MONTHS_PER_INITIAL_LOAD)
 
     legend = db.rows_to_list(
         db.query("SELECT key, label, color FROM content_types WHERE archived = 0 ORDER BY sort_order")
@@ -74,11 +98,28 @@ def month_view():
 
     return render_template(
         "calendar_month.html",
-        weeks=weeks, by_day=by_day, year=year, month=month,
-        month_name=pycal.month_name[month], today=today,
-        prev_month=prev_month, prev_year=prev_year,
-        next_month=next_month, next_year=next_year,
+        month_blocks=month_blocks, today=today,
+        jump_year=year, jump_month=month,
+        sentinel_year=sentinel_year, sentinel_month=sentinel_month,
+        weekday_headers=WEEKDAY_HEADERS,
         legend=legend,
+    )
+
+
+@bp.route("/calendar/month-fragment")
+@login_required
+def month_fragment():
+    """Returns one month's worth of calendar grid HTML (a divider + its
+    weeks) for calendar.js to append as the user scrolls further down."""
+    year = request.args.get("year", type=int)
+    month = request.args.get("month", type=int)
+    if not year or not month or not (1 <= month <= 12):
+        return "", 400
+    block = _build_month_block(year, month)
+    return render_template(
+        "partials/calendar_month_fragment.html",
+        weeks=block["weeks"], by_day=block["by_day"], today=date.today(),
+        month=block["month"], year=block["year"], month_name=block["month_name"],
     )
 
 
@@ -88,7 +129,7 @@ def week_view():
     today = date.today()
     anchor_str = request.args.get("date")
     anchor = date.fromisoformat(anchor_str) if anchor_str else today
-    start = anchor - timedelta(days=anchor.weekday())
+    start = anchor - timedelta(days=(anchor.weekday() + 1) % 7)  # Sunday-first, matches the month calendar
     end = start + timedelta(days=6)
     days = [start + timedelta(days=i) for i in range(7)]
     by_day = _outputs_by_day(start, end)

@@ -38,46 +38,80 @@ PLATFORMS = [
     ("podcast", "Podcast (Spotify/Apple)"),
 ]
 
-# key, label, color, is_filler, req_video, req_music, req_jodie, lead_days, platform_keys, is_campaign_type
+# key, label, color, category, is_filler, req_video, req_music, req_jodie, lead_days, platform_keys, is_campaign_type
+# category: 'targeted' | 'filler' | 'monthly' (Part 7/8/9 — the three big
+# creation buckets Jodie asked for, replacing the old flat type list).
 CONTENT_TYPES = [
-    ("targeted_short", "Targeted Video — Short", "#C895D5", 0, 1, 1, 1, 10, ["instagram", "tiktok", "facebook", "threads"], 1),
-    ("targeted_long", "Targeted Video — YouTube", "#F09756", 0, 1, 1, 1, 10, ["youtube"], 0),
-    ("highlight", "Highlight / Snippet", "#FEBD5A", 0, 1, 0, 1, 3, ["instagram", "facebook", "threads"], 0),
-    ("tiktok_style", "TikTok-Style Video", "#A3C0B6", 1, 1, 0, 1, 4, ["tiktok"], 0),
-    ("carousel", "Carousel", "#FD738E", 1, 1, 0, 1, 3, ["instagram", "facebook"], 0),
-    ("normal_post", "Normal / Static Post", "#9FA5C9", 1, 0, 0, 1, 2, ["instagram", "facebook", "threads"], 0),
-    ("moving_scripture", "Moving Scripture", "#CC6DA6", 1, 1, 1, 1, 4, ["instagram", "facebook"], 0),
-    ("podcast_question", "Podcast Question", "#97D2FB", 1, 1, 0, 1, 3, ["instagram", "facebook", "threads"], 0),
-    ("testimony", "Testimony", "#75AAC9", 0, 1, 0, 1, 10, ["instagram", "youtube", "facebook"], 0),
-    ("blog", "Blog Post", "#FEC4D5", 0, 0, 0, 1, 7, ["website"], 0),
-    ("podcast_episode", "Podcast Episode", "#7FC8A9", 0, 1, 1, 1, 10, ["youtube", "podcast"], 0),
-    ("quick_reel", "Quick Reel", "#B5EAD7", 1, 1, 0, 1, 3, ["instagram", "tiktok"], 0),
-    ("interview", "Interview / Studio", "#FFDAC1", 1, 1, 0, 1, 7, ["youtube", "instagram"], 0),
-    ("bible_study", "Bible Study", "#C7CEEA", 1, 1, 0, 1, 5, ["youtube", "instagram"], 0),
-    ("preaching_snippet", "Preaching / Teaching Snippet", "#E2F0CB", 1, 1, 0, 1, 3, ["instagram", "facebook"], 0),
-    ("course", "Course / Educational", "#FFD3B4", 0, 1, 0, 1, 14, ["youtube", "website"], 0),
-    ("custom", "Custom", "#D9D9D9", 1, 0, 0, 1, 5, [], 0),
+    # ---- Targeted Campaign (Part 7): 5 types sharing one biweekly cycle ----
+    ("targeted_short", "Targeted Video — Short", "#C895D5", "targeted", 0, 1, 1, 1, 10, ["instagram", "tiktok", "facebook", "threads"], 1),
+    ("targeted_long", "Targeted Video — YouTube", "#F09756", "targeted", 0, 1, 1, 1, 10, ["youtube"], 0),
+    ("highlight_1", "Highlight / Snippet 1", "#FEBD5A", "targeted", 0, 1, 0, 1, 3, ["instagram", "facebook", "threads"], 0),
+    ("highlight_2", "Highlight / Snippet 2", "#F5A742", "targeted", 0, 1, 0, 1, 3, ["instagram", "facebook", "threads"], 0),
+    # The full long-form video, cut to portrait and reposted across the other
+    # platforms once the highlight reels are done — the "5th targeted type"
+    # Jodie asked us to name; renameable any time from Admin > Content Types.
+    ("targeted_full_repost", "Full Episode — Portrait Repost", "#E08A45", "targeted", 0, 1, 0, 1, 3, ["instagram", "facebook", "threads", "tiktok"], 0),
+
+    # ---- Filler Post (Part 8): 9 subtypes under one "Filler Post" menu option ----
+    ("tiktok_style", "TikTok Style Reel", "#A3C0B6", "filler", 1, 1, 0, 1, 4, ["tiktok"], 0),
+    ("interview", "Interview / Studio", "#FFDAC1", "filler", 1, 1, 0, 1, 7, ["youtube", "instagram"], 0),
+    ("carousel", "Carousel Post", "#FD738E", "filler", 1, 1, 0, 1, 3, ["instagram", "facebook"], 0),
+    ("normal_post", "Normal / Static Post", "#9FA5C9", "filler", 1, 0, 0, 1, 2, ["instagram", "facebook", "threads"], 0),
+    ("moving_scripture", "Moving Scripture", "#CC6DA6", "filler", 1, 1, 1, 1, 4, ["instagram", "facebook"], 0),
+    ("quick_reel", "Quick Reel", "#B5EAD7", "filler", 1, 1, 0, 1, 3, ["instagram", "tiktok"], 0),
+    ("scripture_expansion", "Scripture Expansion", "#C7CEEA", "filler", 1, 1, 0, 1, 4, ["instagram", "facebook"], 0),
+    # These two are never auto-scheduled unless a matching idea already
+    # exists AND that idea includes a link to the relevant source video —
+    # that idea-matching logic is part of the (not-yet-built) Ideas overhaul,
+    # so for now they're simply left off every scheduling rule.
+    ("preaching_teaching", "Preaching / Teaching", "#E2F0CB", "filler", 1, 1, 0, 1, 3, ["instagram", "facebook"], 0),
+    ("podcast_additional_highlight", "Podcast Additional Highlight Snippet", "#97D2FB", "filler", 1, 1, 0, 1, 3, ["instagram", "facebook", "threads"], 0),
+
+    # ---- Monthly Campaign (Part 9): 7 types, lighter-weight recurring content ----
+    ("podcast_episode", "Podcast Episode", "#7FC8A9", "monthly", 0, 1, 1, 1, 10, ["youtube", "podcast"], 0),
+    ("podcast_highlight", "Podcast Highlight Snippet / Question", "#6FB89A", "monthly", 0, 1, 0, 1, 3, ["instagram", "facebook", "threads"], 0),
+    # Not auto-scheduled yet (future functionality, per Jodie) — exist as
+    # pickable types only, for now.
+    ("course", "Course / Educational", "#FFD3B4", "monthly", 0, 1, 0, 1, 14, ["youtube", "website"], 0),
+    ("course_highlight", "Course Highlight Snippet", "#FFC199", "monthly", 0, 1, 0, 1, 3, ["instagram", "facebook"], 0),
+    ("blog", "Blog Post", "#FEC4D5", "monthly", 0, 0, 0, 1, 7, ["website"], 0),
+    ("blog_video", "Blog Post Video", "#F7A8C4", "monthly", 0, 1, 0, 1, 7, ["youtube", "instagram"], 0),
+    ("testimony", "Testimony", "#75AAC9", "monthly", 0, 1, 0, 1, 10, ["instagram", "youtube", "facebook"], 0),
+
+    # Custom Events (Part 19) are scheduling blocks (team unavailable, a
+    # holiday, a busy period) rather than actual content, so they get their
+    # own category — never counted as filler content or targeted for the
+    # filler-cascade drag behaviour.
+    ("custom", "Custom Event", "#D9D9D9", "custom", 1, 0, 0, 1, 5, [], 0),
 ]
 
+# Single-type options map straight through (unchanged); Filler Post and
+# Monthly Campaign use pick_subtype=True so the create-content modal shows a
+# second "which type?" dropdown instead of creating every listed type at
+# once (Part 8/9's two-level picker).
+# key, label, icon, type_keys, pick_subtype
 CREATION_OPTIONS = [
-    ("targeted_campaign", "Targeted Campaign", "🎯", ["targeted_short", "targeted_long"]),
-    ("podcast", "Podcast Episode", "🎙️", ["podcast_episode"]),
-    ("testimony", "Testimony", "🙌", ["testimony"]),
-    ("blog", "Blog", "📝", ["blog"]),
-    ("carousel", "Carousel", "🎠", ["carousel"]),
-    ("normal_post", "Normal Post", "📱", ["normal_post"]),
-    ("moving_scripture", "Moving Scripture", "✝️", ["moving_scripture"]),
-    ("quick_reel", "Quick Reel", "⚡", ["quick_reel"]),
-    ("interview", "Interview / Studio", "🎬", ["interview"]),
-    ("tiktok_style", "TikTok-Style Video", "🎵", ["tiktok_style"]),
-    ("preaching_snippet", "Preaching / Teaching Snippet", "📖", ["preaching_snippet"]),
-    ("bible_study", "Bible Study", "📚", ["bible_study"]),
-    ("course", "Course / Educational", "🎓", ["course"]),
-    ("custom", "Custom", "✨", ["custom"]),
+    ("targeted_campaign", "Targeted Campaign", "🎯", ["targeted_short", "targeted_long"], False),
+    ("filler_post", "Filler Post", "🧩", [
+        "tiktok_style", "interview", "carousel", "normal_post", "moving_scripture",
+        "quick_reel", "scripture_expansion", "preaching_teaching", "podcast_additional_highlight",
+    ], True),
+    ("monthly_campaign", "Monthly Campaign", "📅", [
+        "podcast_episode", "podcast_highlight", "course", "course_highlight", "blog", "blog_video", "testimony",
+    ], True),
+    ("custom", "Custom Event", "✨", ["custom"], False),
 ]
 
 # task templates: content_type_key -> [(role_key, task_name, offset_days_before)]
+# NOTE: these are still the simple/lightweight task lists from before the
+# full production-pipeline rebuild (Part 14-18: Script Development ->
+# Concept Hashout -> Film/Record -> Edit -> Review -> Audio -> Final
+# Compilation, with real Calendar/Meet invites and Drive uploads) — that
+# automated pipeline is its own separate, not-yet-started piece of work.
+# These templates just make sure every content type has *something*
+# actionable on the calendar today.
 TASK_TEMPLATES = {
+    # ---- Targeted ----
     "targeted_short": [
         ("admin", "Develop concept", 10), ("admin", "Write script", 9),
         ("production", "Film / record", 7), ("music", "Source/create audio", 6),
@@ -89,13 +123,26 @@ TASK_TEMPLATES = {
         ("production", "Edit long version & hand off to final editor", 4),
         ("editor", "Final pass & polish", 2), ("admin", "Approve long edit", 1),
     ],
-    "highlight": [
+    "highlight_1": [
         ("production", "Cut highlight from source video", 2), ("production", "Export", 1),
         ("admin", "Approve & schedule", 0),
     ],
+    "highlight_2": [
+        ("production", "Cut highlight from source video", 2), ("production", "Export", 1),
+        ("admin", "Approve & schedule", 0),
+    ],
+    "targeted_full_repost": [
+        ("production", "Convert to portrait & export", 1), ("admin", "Caption & schedule", 0),
+    ],
+
+    # ---- Filler ----
     "tiktok_style": [
         ("production", "Film/create clip", 3), ("production", "Edit & export", 1),
         ("admin", "Caption & schedule", 0),
+    ],
+    "interview": [
+        ("admin", "Book guest & prep questions", 6), ("production", "Film interview", 4),
+        ("production", "Edit & export", 1),
     ],
     "carousel": [
         ("production", "Design carousel slides", 2), ("admin", "Write copy & schedule", 0),
@@ -107,39 +154,47 @@ TASK_TEMPLATES = {
         ("production", "Film & edit", 3), ("music", "Add background audio", 1),
         ("admin", "Caption & schedule", 0),
     ],
-    "podcast_question": [
+    "quick_reel": [
+        ("production", "Film & edit", 2), ("admin", "Caption & schedule", 0),
+    ],
+    "scripture_expansion": [
+        ("production", "Film & edit", 2), ("admin", "Caption & schedule", 0),
+    ],
+    "preaching_teaching": [
+        ("production", "Cut & edit clip", 2), ("admin", "Caption & schedule", 0),
+    ],
+    "podcast_additional_highlight": [
+        ("admin", "Pick moment & write copy", 2), ("production", "Create graphic/clip", 1),
+    ],
+
+    # ---- Monthly ----
+    "podcast_episode": [
+        ("admin", "Prep questions/outline", 9), ("production", "Record episode", 7),
+        ("production", "Edit & export", 4), ("music", "Intro/outro audio", 3),
+        ("admin", "Review edit", 3), ("admin", "Schedule & publish", 0),
+    ],
+    "podcast_highlight": [
         ("admin", "Pick question & write copy", 2), ("production", "Create graphic/clip", 1),
+    ],
+    "course": [
+        ("admin", "Outline course content", 12), ("production", "Film & edit lessons", 8),
+        ("admin", "Review all lessons", 3),
+    ],
+    "course_highlight": [
+        ("production", "Cut highlight from source lesson", 2), ("admin", "Approve & schedule", 0),
+    ],
+    "blog": [
+        ("admin", "Write draft", 6), ("admin", "Review & edit", 2), ("admin", "Publish to website", 0),
+    ],
+    "blog_video": [
+        ("production", "Edit companion video", 4), ("admin", "Approve & schedule", 1),
     ],
     "testimony": [
         ("admin", "Reach out & coordinate", 9), ("production", "Film testimony", 7),
         ("production", "Edit & export", 4), ("admin", "Review footage", 3),
         ("admin", "Schedule & publish", 0),
     ],
-    "blog": [
-        ("admin", "Write draft", 6), ("admin", "Review & edit", 2), ("admin", "Publish to website", 0),
-    ],
-    "podcast_episode": [
-        ("admin", "Prep questions/outline", 9), ("production", "Record episode", 7),
-        ("production", "Edit & export", 4), ("music", "Intro/outro audio", 3),
-        ("admin", "Review edit", 3), ("admin", "Schedule & publish", 0),
-    ],
-    "quick_reel": [
-        ("production", "Film & edit", 2), ("admin", "Caption & schedule", 0),
-    ],
-    "interview": [
-        ("admin", "Book guest & prep questions", 6), ("production", "Film interview", 4),
-        ("production", "Edit & export", 1),
-    ],
-    "bible_study": [
-        ("admin", "Write study outline", 4), ("production", "Film/record & edit", 2),
-    ],
-    "preaching_snippet": [
-        ("production", "Cut & edit clip", 2), ("admin", "Caption & schedule", 0),
-    ],
-    "course": [
-        ("admin", "Outline course content", 12), ("production", "Film & edit lessons", 8),
-        ("admin", "Review all lessons", 3),
-    ],
+
     "custom": [
         ("admin", "Plan & schedule", 2),
     ],
@@ -243,21 +298,37 @@ def _platform_ids(keys):
 
 def _seed_content_types():
     ids = {}
-    for i, (key, label, color, is_filler, rv, rm, rj, lead, plat_keys, is_campaign) in enumerate(CONTENT_TYPES):
+    for i, (key, label, color, category, is_filler, rv, rm, rj, lead, plat_keys, is_campaign) in enumerate(CONTENT_TYPES):
         existing = dbmod.query_one("SELECT id FROM content_types WHERE key = ?", (key,))
         if existing:
             ids[key] = existing["id"]
+            # keep the category current on a re-run (e.g. after this update
+            # ships) without touching anything else about an existing type
+            dbmod.execute("UPDATE content_types SET category_key = ? WHERE id = ?", (category, existing["id"]))
             continue
         plat_ids = _platform_ids(plat_keys)
         new_id = dbmod.execute(
             """INSERT INTO content_types
                (key, label, color, description, is_filler, requires_videographer, requires_musician,
-                requires_jodie, default_lead_time_days, default_platform_ids, is_campaign_type, sort_order)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (key, label, color, "", is_filler, rv, rm, rj, lead, dbmod.to_json(plat_ids), is_campaign, i),
+                requires_jodie, default_lead_time_days, default_platform_ids, is_campaign_type, category_key, sort_order)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (key, label, color, "", is_filler, rv, rm, rj, lead, dbmod.to_json(plat_ids), is_campaign, category, i),
         )
         ids[key] = new_id
+    _archive_deprecated_content_types()
     return ids
+
+
+# Content types from the old flat list that Jodie's category restructuring
+# (Part 7/8/9) replaced or split up. They're archived, never deleted — any
+# already-scheduled content still using one keeps working, it just drops out
+# of the "+ Create Content" menu and admin lists going forward.
+DEPRECATED_CONTENT_TYPE_KEYS = ["highlight", "podcast_question", "bible_study", "preaching_snippet"]
+
+
+def _archive_deprecated_content_types():
+    for key in DEPRECATED_CONTENT_TYPE_KEYS:
+        dbmod.execute("UPDATE content_types SET archived = 1 WHERE key = ? AND archived = 0", (key,))
 
 
 def _seed_task_templates(type_ids):
@@ -276,15 +347,30 @@ def _seed_task_templates(type_ids):
 
 
 def _seed_creation_options(type_ids):
-    for i, (key, label, icon, type_keys) in enumerate(CREATION_OPTIONS):
+    for i, (key, label, icon, type_keys, pick_subtype) in enumerate(CREATION_OPTIONS):
         existing = dbmod.query_one("SELECT id FROM creation_options WHERE key = ?", (key,))
         if existing:
             continue
         output_ids = [type_ids[k] for k in type_keys if k in type_ids]
         dbmod.execute(
-            "INSERT INTO creation_options (key, label, icon, output_type_ids, sort_order) VALUES (?,?,?,?,?)",
-            (key, label, icon, dbmod.to_json(output_ids), i),
+            "INSERT INTO creation_options (key, label, icon, output_type_ids, pick_subtype, sort_order) VALUES (?,?,?,?,?,?)",
+            (key, label, icon, dbmod.to_json(output_ids), 1 if pick_subtype else 0, i),
         )
+    _archive_deprecated_creation_options()
+
+
+# These single-type "+ Create Content" menu entries are now folded into the
+# "Filler Post" / "Monthly Campaign" two-step picker (Part 8/9) — archived
+# rather than deleted so nothing that referenced them historically breaks.
+DEPRECATED_CREATION_OPTION_KEYS = [
+    "podcast", "testimony", "blog", "carousel", "normal_post", "moving_scripture",
+    "quick_reel", "interview", "tiktok_style", "preaching_snippet", "bible_study", "course",
+]
+
+
+def _archive_deprecated_creation_options():
+    for key in DEPRECATED_CREATION_OPTION_KEYS:
+        dbmod.execute("UPDATE creation_options SET archived = 1 WHERE key = ? AND archived = 0", (key,))
 
 
 def _seed_users():
@@ -306,43 +392,68 @@ def _seed_users():
 def _seed_scheduling_rules(type_ids):
     today = date.today()
 
-    if not dbmod.query_one("SELECT id FROM scheduling_rules WHERE label LIKE 'Targeted Campaign%'"):
-        anchor = next_weekday(today, 2)  # Wednesday
-        dbmod.execute(
-            """INSERT INTO scheduling_rules
-               (label, content_type_id, rule_type, weekday, interval_days, anchor_date, horizon_weeks, default_title)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            ("Targeted Campaign — biweekly Wednesday", type_ids["targeted_short"], "biweekly", 2, 14,
-             anchor.isoformat(), 12, "New Targeted Campaign"),
-        )
+    def _roll_to_next_valid_month(compute_fn, y, m):
+        for _ in range(14):
+            occ = compute_fn(y, m)
+            if occ and occ >= today:
+                return occ
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+        return None
 
-    if not dbmod.query_one("SELECT id FROM scheduling_rules WHERE label LIKE 'Testimony%'"):
-        anchor = scheduling.last_weekday_of_month(today.year, today.month, 1)  # Tuesday
-        if anchor < today:
-            nm = today.month + 1 if today.month < 12 else 1
-            ny = today.year if today.month < 12 else today.year + 1
-            anchor = scheduling.last_weekday_of_month(ny, nm, 1)
-        dbmod.execute(
-            """INSERT INTO scheduling_rules
-               (label, content_type_id, rule_type, weekday, anchor_date, horizon_weeks, default_title)
-               VALUES (?,?,?,?,?,?,?)""",
-            ("Testimony — last Tuesday of the month", type_ids["testimony"], "monthly_last_weekday", 1,
-             anchor.isoformat(), 12, "Monthly Testimony"),
-        )
+    def _upsert_rule(content_type_key, label, rule_type, weekday, anchor, horizon_weeks,
+                      default_title, nth=None, interval_days=None, interval_months=None):
+        """Insert a scheduling rule, or correct an existing one for the same
+        content type in place if Jodie's spec changed its cadence (e.g.
+        Testimony moving from 'last Tuesday' to 'first Tuesday') — updating
+        rather than skip-if-exists so a corrected rule actually takes effect
+        on a re-run, without losing the row's history/id."""
+        ct_id = type_ids.get(content_type_key)
+        if not ct_id:
+            return
+        existing = dbmod.query_one("SELECT id FROM scheduling_rules WHERE content_type_id = ?", (ct_id,))
+        params = (label, rule_type, weekday, interval_days, nth, interval_months, anchor.isoformat(),
+                  horizon_weeks, default_title)
+        if existing:
+            dbmod.execute(
+                """UPDATE scheduling_rules SET label=?, rule_type=?, weekday=?, interval_days=?, nth=?,
+                       interval_months=?, anchor_date=?, horizon_weeks=?, default_title=? WHERE id=?""",
+                params + (existing["id"],),
+            )
+        else:
+            dbmod.execute(
+                """INSERT INTO scheduling_rules
+                   (label, rule_type, weekday, interval_days, nth, interval_months, anchor_date,
+                    horizon_weeks, default_title, content_type_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                params + (ct_id,),
+            )
 
-    if not dbmod.query_one("SELECT id FROM scheduling_rules WHERE label LIKE 'Podcast Episode%'"):
-        anchor = scheduling.nth_weekday_of_month(today.year, today.month, 2, 2)  # 2nd Wednesday
-        if not anchor or anchor < today:
-            nm = today.month + 1 if today.month < 12 else 1
-            ny = today.year if today.month < 12 else today.year + 1
-            anchor = scheduling.nth_weekday_of_month(ny, nm, 2, 2)
-        dbmod.execute(
-            """INSERT INTO scheduling_rules
-               (label, content_type_id, rule_type, weekday, nth, anchor_date, horizon_weeks, default_title)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            ("Podcast Episode — monthly (2nd Wednesday)", type_ids["podcast_episode"], "monthly_nth_weekday", 2, 2,
-             anchor.isoformat(), 12, "Monthly Podcast Episode"),
-        )
+    # Targeted Campaign — unchanged biweekly Wednesday rhythm.
+    anchor = next_weekday(today, 2)  # Wednesday
+    _upsert_rule("targeted_short", "Targeted Campaign — biweekly Wednesday", "biweekly", 2,
+                 anchor, 12, "New Targeted Campaign", interval_days=14)
+
+    # Testimony — first Tuesday of every month.
+    anchor = _roll_to_next_valid_month(lambda y, m: scheduling.nth_weekday_of_month(y, m, 1, 1), today.year, today.month)
+    _upsert_rule("testimony", "Testimony — first Tuesday of the month", "monthly_nth_weekday", 1,
+                 anchor, 16, "Monthly Testimony", nth=1)
+
+    # Blog Post — second-last Thursday of every month (Blog Post Video pairs
+    # automatically the same day — see content._spawn_paired_and_followup_content).
+    anchor = _roll_to_next_valid_month(lambda y, m: scheduling.second_last_weekday_of_month(y, m, 3), today.year, today.month)
+    _upsert_rule("blog", "Blog Post — second-last Thursday of the month", "monthly_second_last_weekday", 3,
+                 anchor, 16, "Monthly Blog Post")
+
+    # Podcast Episode — second Thursday of every third month. 3 Highlight/
+    # Question posts per cycle spawn automatically (see
+    # content._spawn_podcast_highlight_followups) — no separate rule needed
+    # for those, they follow the episode.
+    anchor = _roll_to_next_valid_month(lambda y, m: scheduling.nth_weekday_of_month(y, m, 3, 2), today.year, today.month)
+    _upsert_rule("podcast_episode", "Podcast Episode — every 3rd month (2nd Thursday)", "every_n_months_nth_weekday",
+                 3, anchor, 60, "Monthly Podcast Episode", nth=2, interval_months=3)
 
 
 def _seed_ideas(user_ids):

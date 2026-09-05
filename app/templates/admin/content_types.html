@@ -4,12 +4,21 @@
 <div class="page-header"><div><h1 class="page-title">Content Types</h1><div class="page-subtitle">The colour-coded key. Each type carries its own colour, defaults, and requirements.</div></div></div>
 
 <table class="admin-table" style="margin-bottom:24px;">
-  <thead><tr><th></th><th>Label</th><th>Filler?</th><th>Needs</th><th>Lead time</th><th></th></tr></thead>
+  <thead><tr><th></th><th>Label</th><th>Category</th><th>Filler?</th><th>Needs</th><th>Lead time</th><th></th></tr></thead>
   <tbody>
     {% for t in types %}
     <tr style="opacity:{{ 0.5 if t.archived else 1 }}">
       <td><span class="color-swatch" style="background:{{ t.color }}"></span></td>
       <td>{{ t.label }}</td>
+      <td>
+        <form method="post" action="{{ url_for('admin.content_type_set_category', type_id=t.id) }}">
+          <select class="field-select" name="category_key" onchange="this.form.submit()" style="width:auto;">
+            {% for c in ['targeted', 'filler', 'monthly', 'custom'] %}
+            <option value="{{ c }}" {{ 'selected' if t.category_key == c }}>{{ c|capitalize }}</option>
+            {% endfor %}
+          </select>
+        </form>
+      </td>
       <td>{{ 'Yes' if t.is_filler else 'No' }}</td>
       <td>
         {% if t.requires_videographer %}🎥{% endif %}
@@ -37,6 +46,16 @@
     <div class="form-grid" style="margin-bottom:12px;">
       <div><label class="field-label">Colour</label><input class="field-input" type="color" name="color" value="#9FA5C9"></div>
       <div><label class="field-label">Default lead time (days)</label><input class="field-input" type="number" name="default_lead_time_days" value="5"></div>
+    </div>
+    <div class="form-grid" style="margin-bottom:12px;">
+      <div><label class="field-label">Category</label>
+        <select class="field-select" name="category_key">
+          <option value="targeted">Targeted</option>
+          <option value="filler" selected>Filler</option>
+          <option value="monthly">Monthly</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
     </div>
     <label class="field-label">Description</label>
     <textarea class="field-textarea" name="description" style="margin-bottom:12px;"></textarea>

@@ -44,6 +44,23 @@ def quick_create():
     if not type_ids:
         return jsonify({"error": "That content type has no outputs configured."}), 400
 
+    # Filler Post / Monthly Campaign (Part 8/9): the option lists a MENU of
+    # possible types rather than a fixed set of outputs, and the modal's
+    # second dropdown submits the one actually chosen as an override.
+    extra_output_type_ids = type_ids[1:]
+    if option["pick_subtype"]:
+        chosen_raw = data.get("content_type_id")
+        try:
+            chosen_id = int(chosen_raw)
+        except (TypeError, ValueError):
+            chosen_id = None
+        if not chosen_id or chosen_id not in type_ids:
+            return jsonify({"error": "Please choose a specific type."}), 400
+        primary_type_id = chosen_id
+        extra_output_type_ids = []
+    else:
+        primary_type_id = type_ids[0]
+
     platform_ids = data.get("platform_ids") or None
     assigned_user_id = data.get("assigned_user_id") or None
     owner_id = data.get("owner_id") or g.user["id"]
@@ -51,13 +68,13 @@ def quick_create():
     campaign_id = content_module.create_campaign(
         title=title,
         publish_date_iso=publish_date,
-        content_type_id=type_ids[0],
+        content_type_id=primary_type_id,
         platform_ids=platform_ids,
         owner_id=owner_id,
         assigned_user_id=assigned_user_id,
         concept=data.get("concept", ""),
         created_by=g.user["id"],
-        extra_output_type_ids=type_ids[1:],
+        extra_output_type_ids=extra_output_type_ids,
     )
     return jsonify({"campaign_id": campaign_id})
 

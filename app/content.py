@@ -7,6 +7,7 @@ from datetime import date, timedelta
 
 from . import db
 from . import task_engine
+from . import scheduling
 
 
 def get_content_type(content_type_id):
@@ -33,70 +34,112 @@ def create_campaign_from_rule(rule, publish_date_iso):
 
     add_output(campaign_id, ct["id"], publish_date_iso)
     task_engine.generate_tasks_for_campaign(campaign_id)
-
-    # A targeted campaign automatically spawns its long-form companion output
-    # (Part 10: short + long from the same shared topic) and, a week later,
-    # a dependent highlight-snippet follow-up pair (Part 11).
-    if ct["key"] == "targeted_short":
-        long_ct = get_content_type_by_key("targeted_long")
-        if long_ct:
-            add_output(campaign_id, long_ct["id"], publish_date_iso)
-            task_engine.generate_tasks_for_campaign(campaign_id, only_new_output_type=long_ct["id"])
-        _spawn_highlight_followups(campaign_id, publish_date_iso)
-
-    if ct["key"] == "testimony":
-        _spawn_blog_followup(campaign_id, publish_date_iso)
+    _spawn_paired_and_followup_content(campaign_id, ct, publish_date_iso)
 
     return campaign_id
 
 
-def _spawn_blog_followup(parent_campaign_id, parent_publish_iso, actor_id=None):
-    """Blog is locked one day after Testimony in the observed pattern
-    (Tue testimony -> Wed blog, same end-of-month week)."""
-    blog_ct = get_content_type_by_key("blog")
-    if not blog_ct:
-        return
-    follow_date = (date.fromisoformat(parent_publish_iso) + timedelta(days=1)).isoformat()
-    parent_title = db.query_one("SELECT title FROM campaigns WHERE id = ?", (parent_campaign_id,))["title"]
-    dep_id = db.execute(
-        """INSERT INTO campaigns
-           (title, publish_date, status, primary_content_type_id,
-            schedule_origin, depends_on_campaign_id, dependency_offset_days,
-            created_at, updated_at)
-           VALUES (?, ?, 'planned', ?, 'dependent', ?, 1, datetime('now'), datetime('now'))""",
-        (f"End of month blog — {parent_title}", follow_date, blog_ct["id"], parent_campaign_id),
-    )
-    add_output(dep_id, blog_ct["id"], follow_date)
-    task_engine.generate_tasks_for_campaign(dep_id)
-    db.execute(
-        "INSERT INTO activity_log (campaign_id, actor_id, message) VALUES (?, ?, ?)",
-        (dep_id, actor_id, f"Auto-created alongside '{parent_title}' (monthly testimony + blog pairing)."),
-    )
+def _spawn_paired_and_followup_content(campaign_id, ct, publish_date_iso, actor_id=None):
+    """The auto-pairing/follow-up rules that apply regardless of whether the
+    campaign came from a recurring rule or a manual quick-create — kept in
+    one place so both create_campaign_from_rule() and create_campaign() stay
+    in sync (Part 7/9/11)."""
+    # Targeted Video: Short auto-spawns its YouTube companion as a second
+    # output on the SAME campaign (Part 7), then two highlight/snippet
+    # follow-ups and the portrait "full episode" repost as dependent
+    # campaigns the following week (Part 7's 5th targeted type).
+    if ct["key"] == "targeted_short":
+        long_ct = get_content_type_by_key("targeted_long")
+        if long_ct and not db.query_one(
+            "SELECT id FROM content_outputs WHERE campaign_id = ? AND content_type_id = ?",
+            (campaign_id, long_ct["id"]),
+        ):
+            add_output(campaign_id, long_ct["id"], publish_date_iso)
+            task_engine.generate_tasks_for_campaign(campaign_id, only_new_output_type=long_ct["id"])
+        _spawn_targeted_followups(campaign_id, publish_date_iso, actor_id)
+
+    # Blog Post pairs with Blog Post Video the same day — same pattern as
+    # Targeted Short+YouTube, but with no highlight-snippet follow-ups (Part 9).
+    if ct["key"] == "blog":
+        video_ct = get_content_type_by_key("blog_video")
+        if video_ct and not db.query_one(
+            "SELECT id FROM content_outputs WHERE campaign_id = ? AND content_type_id = ?",
+            (campaign_id, video_ct["id"]),
+        ):
+            add_output(campaign_id, video_ct["id"], publish_date_iso)
+            task_engine.generate_tasks_for_campaign(campaign_id, only_new_output_type=video_ct["id"])
+
+    # Podcast Episode gets 3 Highlight/Question posts per 3-month cycle: one
+    # the same day as the episode, the other two on the 2nd Thursday of each
+    # of the following two months (Part 9).
+    if ct["key"] == "podcast_episode":
+        _spawn_podcast_highlight_followups(campaign_id, publish_date_iso, actor_id)
 
 
-def _spawn_highlight_followups(parent_campaign_id, parent_publish_iso, actor_id=None):
-    highlight_ct = get_content_type_by_key("highlight")
-    if not highlight_ct:
-        return
+def _spawn_targeted_followups(parent_campaign_id, parent_publish_iso, actor_id=None):
     parent_date = date.fromisoformat(parent_publish_iso)
-    # mirrors the observed pattern: highlight snippets land on the Monday and
-    # Friday of the following week (offsets +5 and +9 days from a Wednesday)
-    for offset, label in ((5, "Highlight Snippet (Mon follow-up)"), (9, "Highlight Snippet (Fri follow-up)")):
+    parent_title = db.query_one("SELECT title FROM campaigns WHERE id = ?", (parent_campaign_id,))["title"]
+    # Highlight/Snippet 1 & 2 land on the Monday and Friday of the following
+    # week (offsets +5 and +9 days from a Wednesday anchor); the portrait
+    # "full episode" repost lands the Monday after that — before the next
+    # targeted campaign begins on a 14-day cycle (offset +11).
+    followups = (
+        (5, "highlight_1", "Highlight/Snippet 1"),
+        (9, "highlight_2", "Highlight/Snippet 2"),
+        (11, "targeted_full_repost", "Full Episode — Portrait Repost"),
+    )
+    for offset, type_key, label in followups:
+        ct = get_content_type_by_key(type_key)
+        if not ct:
+            continue
         follow_date = (parent_date + timedelta(days=offset)).isoformat()
-        parent_title = db.query_one("SELECT title FROM campaigns WHERE id = ?", (parent_campaign_id,))["title"]
         dep_id = db.execute(
             """INSERT INTO campaigns
                (title, publish_date, status, primary_content_type_id,
                 schedule_origin, depends_on_campaign_id, dependency_offset_days,
                 created_at, updated_at)
                VALUES (?, ?, 'planned', ?, 'dependent', ?, ?, datetime('now'), datetime('now'))""",
-            (f"{parent_title} — Highlight Snippet", follow_date, highlight_ct["id"], parent_campaign_id, offset),
+            (f"{parent_title} — {label}", follow_date, ct["id"], parent_campaign_id, offset),
         )
-        add_output(dep_id, highlight_ct["id"], follow_date)
+        add_output(dep_id, ct["id"], follow_date)
         task_engine.generate_tasks_for_campaign(dep_id)
         db.execute(
             "INSERT INTO activity_log (campaign_id, actor_id, message) VALUES (?, ?, ?)",
             (dep_id, actor_id, f"Auto-created as a follow-up to '{parent_title}'."),
+        )
+
+
+def _spawn_podcast_highlight_followups(parent_campaign_id, parent_publish_iso, actor_id=None):
+    hl_ct = get_content_type_by_key("podcast_highlight")
+    if not hl_ct:
+        return
+    parent_date = date.fromisoformat(parent_publish_iso)
+    parent_title = db.query_one("SELECT title FROM campaigns WHERE id = ?", (parent_campaign_id,))["title"]
+
+    targets = [(parent_date, "same day as the episode")]
+    y, m = parent_date.year, parent_date.month
+    for i in (1, 2):
+        y2, m2 = scheduling.add_months_ym(y, m, i)
+        occ = scheduling.nth_weekday_of_month(y2, m2, 3, 2)  # 2nd Thursday (Thu=3, Mon=0 convention)
+        if occ:
+            targets.append((occ, f"2nd Thursday, {i} month(s) after the episode"))
+
+    for idx, (occ_date, note) in enumerate(targets, start=1):
+        follow_date = occ_date.isoformat()
+        dep_id = db.execute(
+            """INSERT INTO campaigns
+               (title, publish_date, status, primary_content_type_id,
+                schedule_origin, depends_on_campaign_id, dependency_offset_days,
+                created_at, updated_at)
+               VALUES (?, ?, 'planned', ?, 'dependent', ?, ?, datetime('now'), datetime('now'))""",
+            (f"{parent_title} — Highlight/Question {idx}", follow_date, hl_ct["id"], parent_campaign_id,
+             (occ_date - parent_date).days),
+        )
+        add_output(dep_id, hl_ct["id"], follow_date)
+        task_engine.generate_tasks_for_campaign(dep_id)
+        db.execute(
+            "INSERT INTO activity_log (campaign_id, actor_id, message) VALUES (?, ?, ?)",
+            (dep_id, actor_id, f"Auto-created — one of 3 highlight/question posts for this podcast cycle ({note})."),
         )
 
 
@@ -134,18 +177,10 @@ def create_campaign(*, title, publish_date_iso, content_type_id, platform_ids=No
         add_output(campaign_id, extra_id, publish_date_iso, assigned_user_id=assigned_user_id)
     task_engine.generate_tasks_for_campaign(campaign_id)
 
-    # Same auto-follow-up behaviour as rule-generated campaigns, so a
-    # manually-created targeted campaign or testimony gets its highlight
-    # snippets / end-of-month blog too (Part 11), not just the recurring ones.
-    if ct["key"] == "targeted_short" and not extra_output_type_ids:
-        long_ct = get_content_type_by_key("targeted_long")
-        if long_ct:
-            add_output(campaign_id, long_ct["id"], publish_date_iso, assigned_user_id=assigned_user_id)
-            task_engine.generate_tasks_for_campaign(campaign_id, only_new_output_type=long_ct["id"])
-    if ct["key"] == "targeted_short":
-        _spawn_highlight_followups(campaign_id, publish_date_iso, actor_id=created_by)
-    if ct["key"] == "testimony":
-        _spawn_blog_followup(campaign_id, publish_date_iso, actor_id=created_by)
+    # Same auto-pairing/follow-up behaviour as rule-generated campaigns (Part
+    # 7/9/11), so a manually-created Targeted Video, Blog Post or Podcast
+    # Episode gets its companion output(s) too, not just the recurring ones.
+    _spawn_paired_and_followup_content(campaign_id, ct, publish_date_iso, actor_id=created_by)
 
     return campaign_id
 

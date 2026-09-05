@@ -1,18 +1,17 @@
 {% extends "base.html" %}
-{% block title %}{{ month_name }} {{ year }} — Calendar{% endblock %}
+{% import "partials/_calendar_macros.html" as cal %}
+{% block title %}Calendar{% endblock %}
 {% block content %}
 <div class="page-header">
   <div>
     <h1 class="page-title">Calendar</h1>
-    <div class="page-subtitle">What are we posting, when, and who's on it.</div>
+    <div class="page-subtitle">What are we posting, when, and who's on it. Click any empty date to add something — keep scrolling for more months.</div>
   </div>
   <button class="btn btn-primary" id="create-content-btn">+ Create Content</button>
 </div>
 
 <div class="calendar-toolbar">
-  <a class="btn btn-outline btn-sm" href="{{ url_for('calendar.month_view', year=prev_year, month=prev_month) }}">‹</a>
-  <div class="month-label">{{ month_name }} {{ year }}</div>
-  <a class="btn btn-outline btn-sm" href="{{ url_for('calendar.month_view', year=next_year, month=next_month) }}">›</a>
+  <input class="field-input" type="month" id="cal-jump-input" value="{{ '%04d-%02d' % (jump_year, jump_month) }}" style="max-width:170px;">
   <a class="btn btn-outline btn-sm" href="{{ url_for('calendar.month_view') }}">Today</a>
 </div>
 
@@ -22,30 +21,16 @@
   {% endfor %}
 </div>
 
-<div class="calendar-grid">
-  {% for wd in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
-    <div class="calendar-weekday-header">{{ wd }}</div>
+<div class="calendar-grid" id="calendar-grid">
+  {% for wd in weekday_headers %}
+    <div class="calendar-weekday-header sticky-header">{{ wd }}</div>
   {% endfor %}
-  {% for week in weeks %}
-    {% for day in week %}
-      {% set iso = day.isoformat() %}
-      <div class="calendar-day {{ 'today' if day == today }} {{ 'other-month' if day.month != month }}" data-date="{{ iso }}">
-        <div class="day-number {{ 'is-today' if day == today }}">{{ day.day }}</div>
-        {% for item in by_day.get(iso, []) %}
-        <div class="content-card" draggable="true" data-output-id="{{ item.output_id }}" data-campaign-id="{{ item.campaign_id }}"
-             style="background:{{ item.type_color }}55; border-left-color:{{ item.type_color }};">
-          <span class="cc-type">{{ item.type_label }}</span>
-          <span class="cc-title">{{ item.campaign_title }}</span>
-          <span class="cc-meta">
-            <span class="status-dot status-{{ item.status }}" title="{{ item.status|status_label }}"></span>
-            {% if item.assigned_name %}<span class="avatar" style="width:16px;height:16px;font-size:8px;">{{ item.assigned_name|initials }}</span>{% endif %}
-          </span>
-        </div>
-        {% endfor %}
-      </div>
-    {% endfor %}
+  {% for mb in month_blocks %}
+    {{ cal.render_month_block(mb.weeks, mb.by_day, today, mb.month, mb.year, mb.month_name) }}
   {% endfor %}
 </div>
+<div id="calendar-sentinel" data-next-year="{{ sentinel_year }}" data-next-month="{{ sentinel_month }}"></div>
+<div id="calendar-loading" class="page-subtitle" style="text-align:center; padding:14px; display:none;">Loading more…</div>
 {% endblock %}
 
 {% block scripts %}
