@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% import "partials/_calendar_macros.html" as cal %}
+{% block title %}Calendar{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Calendar</h1>
+    <div class="page-subtitle">What are we posting, when, and who's on it. Click any empty date to add something — keep scrolling for more months.</div>
+  </div>
+  <button class="btn btn-primary" id="create-content-btn">+ Create Content</button>
+</div>
+
+<div class="calendar-toolbar">
+  <input class="field-input" type="month" id="cal-jump-input" value="{{ '%04d-%02d' % (jump_year, jump_month) }}" style="max-width:170px;">
+  <a class="btn btn-outline btn-sm" href="{{ url_for('calendar.month_view') }}">Today</a>
+</div>
+
+<div class="legend">
+  {% for l in legend %}
+  <div class="legend-item"><span class="legend-dot" style="background:{{ l.color }}"></span>{{ l.label }}</div>
+  {% endfor %}
+</div>
+
+<div class="calendar-grid" id="calendar-grid">
+  {% for wd in weekday_headers %}
+    <div class="calendar-weekday-header sticky-header">{{ wd }}</div>
+  {% endfor %}
+  {% for mb in month_blocks %}
+    {{ cal.render_month_block(mb.weeks, mb.by_day, today, mb.month, mb.year, mb.month_name) }}
+  {% endfor %}
+</div>
+<div id="calendar-sentinel" data-next-year="{{ sentinel_year }}" data-next-month="{{ sentinel_month }}"></div>
+<div id="calendar-loading" class="page-subtitle" style="text-align:center; padding:14px; display:none;">Loading more…</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/calendar.js') }}"></script>
+{% endblock %}

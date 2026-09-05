@@ -1,0 +1,30 @@
+{# Shared day-cell rendering so the initial page load and the AJAX
+   "load more months" fragments (calendar.js infinite scroll) produce
+   byte-identical markup. #}
+
+{% macro render_day(day, by_day, today, month) %}
+{% set iso = day.isoformat() %}
+<div class="calendar-day {{ 'today' if day == today }} {{ 'other-month' if day.month != month }}" data-date="{{ iso }}">
+  <div class="day-number {{ 'is-today' if day == today }}">{{ day.day }}</div>
+  {% for item in by_day.get(iso, []) %}
+  <div class="content-card" draggable="true" data-output-id="{{ item.output_id }}" data-campaign-id="{{ item.campaign_id }}"
+       style="background:{{ item.type_color }}55; border-left-color:{{ item.type_color }};">
+    <span class="cc-type">{{ item.type_label }}</span>
+    <span class="cc-title">{{ item.campaign_title }}</span>
+    <span class="cc-meta">
+      <span class="status-dot status-{{ item.status }}" title="{{ item.status|status_label }}"></span>
+      {% if item.assigned_name %}<span class="avatar" style="width:16px;height:16px;font-size:8px;">{{ item.assigned_name|initials }}</span>{% endif %}
+    </span>
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{% macro render_month_block(weeks, by_day, today, month, year, month_name) %}
+<div class="calendar-month-divider" data-year="{{ year }}" data-month="{{ month }}">{{ month_name }} {{ year }}</div>
+{% for week in weeks %}
+  {% for day in week %}
+    {{ render_day(day, by_day, today, month) }}
+  {% endfor %}
+{% endfor %}
+{% endmacro %}
