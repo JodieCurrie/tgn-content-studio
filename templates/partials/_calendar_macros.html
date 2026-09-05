@@ -1,0 +1,37 @@
+{# Shared day-cell rendering so the initial page load and the AJAX
+   "load more months" fragments (calendar.js infinite scroll) produce
+   byte-identical markup. #}
+
+{% macro render_day(day, by_day, today, month) %}
+{% set iso = day.isoformat() %}
+<div class="calendar-day {{ 'today' if day == today }} {{ 'other-month' if day.month != month }}" data-date="{{ iso }}">
+  <div class="day-number {{ 'is-today' if day == today }}">{{ day.day }}</div>
+  {% for item in by_day.get(iso, []) %}
+  <div class="content-card" draggable="true" data-output-id="{{ item.output_id }}" data-campaign-id="{{ item.campaign_id }}"
+       style="background:{{ item.type_color }}55; border-left-color:{{ item.type_color }};">
+    <span class="cc-type">{{ item.type_label }}</span>
+    <span class="cc-title">{{ item.campaign_title }}</span>
+    <span class="cc-meta">
+      <span class="status-dot status-{{ item.status }}" title="{{ item.status|status_label }}"></span>
+      {% if item.assigned_name %}<span class="avatar" style="width:16px;height:16px;font-size:8px;">{{ item.assigned_name|initials }}</span>{% endif %}
+    </span>
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{% macro render_week_segment(segment, by_day, today) %}
+{# One vertical, rotated month label spanning every week-row that belongs
+   to it, followed immediately by those weeks' day cells — no divider row,
+   no week ever rendered twice. Grid auto-placement flows the day cells
+   into columns 2-8 because the label reserves column 1 for every row it
+   spans (see .month-rail in app.css). #}
+<div class="month-rail" style="grid-row: span {{ segment.weeks|length }};" data-year="{{ segment.year }}" data-month="{{ segment.month }}">
+  <span>{{ segment.month_name }} {{ segment.year }}</span>
+</div>
+{% for week in segment.weeks %}
+  {% for day in week %}
+    {{ render_day(day, by_day, today, segment.month) }}
+  {% endfor %}
+{% endfor %}
+{% endmacro %}
