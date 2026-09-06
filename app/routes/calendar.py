@@ -14,6 +14,26 @@ WEEKDAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 INITIAL_WEEKS = 14   # how many weeks render before the user has to scroll (~3 months)
 WEEKS_PER_FRAGMENT = 4  # weeks fetched per infinite-scroll batch
 
+# A per-calendar-month color rotation (Jan..Dec, index 0..11), like Jodie's
+# original Excel calendar where each month had its own shade. `rail` is the
+# solid color for the vertical month-name strip; `tint` is a very light wash
+# of the same hue used on that month's own day cells. Same month = same
+# color every year. (rail_color, tint_color)
+MONTH_COLORS = [
+    ("#bdd4e4", "#edf4f9"),  # January
+    ("#bdc1e4", "#edeef9"),  # February
+    ("#cdbde4", "#f2edf9"),  # March
+    ("#e1bde4", "#f8edf9"),  # April
+    ("#e4bdd4", "#f9edf4"),  # May
+    ("#e4bdc1", "#f9edee"),  # June
+    ("#e4cdbd", "#f9f2ed"),  # July
+    ("#e4e1bd", "#f9f8ed"),  # August
+    ("#d4e4bd", "#f4f9ed"),  # September
+    ("#c1e4bd", "#eef9ed"),  # October
+    ("#bde4cd", "#edf9f2"),  # November
+    ("#bde4e1", "#edf9f8"),  # December
+]
+
 
 def _sunday_on_or_before(d):
     return d - timedelta(days=(d.weekday() + 1) % 7)
@@ -56,7 +76,11 @@ def _segment_weeks(weeks):
         if segments and (segments[-1]["year"], segments[-1]["month"]) == (year, month):
             segments[-1]["weeks"].append(week)
         else:
-            segments.append({"year": year, "month": month, "month_name": pycal.month_name[month], "weeks": [week]})
+            rail_color, tint_color = MONTH_COLORS[month - 1]
+            segments.append({
+                "year": year, "month": month, "month_name": pycal.month_name[month], "weeks": [week],
+                "rail_color": rail_color, "tint_color": tint_color,
+            })
     return segments
 
 
