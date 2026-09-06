@@ -21,6 +21,7 @@
 
       {% if current_user.role_is_admin %}
       <div class="sidebar-section-label">Admin</div>
+      <a class="nav-link {{ 'active' if request.endpoint == 'admin.home' }}" href="{{ url_for('admin.home') }}">🛠️ Admin Home</a>
       <a class="nav-link {{ 'active' if request.endpoint == 'admin.content_types' }}" href="{{ url_for('admin.content_types') }}">🎨 Content Types</a>
       <a class="nav-link {{ 'active' if request.endpoint == 'admin.task_templates' }}" href="{{ url_for('admin.task_templates') }}">🧩 Task Templates</a>
       <a class="nav-link {{ 'active' if request.endpoint == 'admin.scheduling_rules' }}" href="{{ url_for('admin.scheduling_rules') }}">🔁 Scheduling Rules</a>
