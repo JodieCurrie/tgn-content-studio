@@ -147,8 +147,13 @@ async function loadNextCalendarWeeks() {
   loadingMoreWeeks = true;
   if (calendarLoading) calendarLoading.style.display = "block";
   const from = calendarSentinel.dataset.nextFrom;
+  // Tell the server which month the rail strip currently ends on, so if
+  // this batch starts partway through that same month it renders an
+  // unlabeled continuation block instead of showing the month name again.
+  const contYear = calendarSentinel.dataset.contYear;
+  const contMonth = calendarSentinel.dataset.contMonth;
   try {
-    const res = await fetch(`/calendar/month-fragment?from=${from}`);
+    const res = await fetch(`/calendar/month-fragment?from=${from}&cont_year=${contYear}&cont_month=${contMonth}`);
     if (res.ok) {
       const html = await res.text();
       const wrapper = document.createElement("div");
@@ -156,6 +161,12 @@ async function loadNextCalendarWeeks() {
       Array.from(wrapper.children).forEach(node => calendarGrid.appendChild(node));
       // matches WEEKS_PER_FRAGMENT in app/routes/calendar.py
       calendarSentinel.dataset.nextFrom = addDaysToIsoDate(from, 4 * 7);
+      const rails = calendarGrid.querySelectorAll(".month-rail");
+      const lastRail = rails[rails.length - 1];
+      if (lastRail) {
+        calendarSentinel.dataset.contYear = lastRail.dataset.year;
+        calendarSentinel.dataset.contMonth = lastRail.dataset.month;
+      }
     }
   } finally {
     loadingMoreWeeks = false;
