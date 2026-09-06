@@ -260,22 +260,37 @@ def next_weekday(from_date, weekday):
 
 
 def seed():
+    """CLI entry point (`python scripts/seed.py`): builds its own app +
+    app context, then runs the actual seeding logic. Kept separate from
+    seed_data() below so that logic can also run *inside* an app context
+    that already exists (e.g. a running request) without recursively
+    creating a second Flask app."""
     app = create_app()
     with app.app_context():
-        _seed_roles()
-        _seed_platforms()
-        type_ids = _seed_content_types()
-        _seed_task_templates(type_ids)
-        _migrate_targeted_video_pipeline(type_ids)
-        _seed_creation_options(type_ids)
-        user_ids = _seed_users()
-        _seed_scheduling_rules(type_ids)
-        _seed_ideas(user_ids)
-        created = scheduling.materialize_all_active_rules()
-        print(f"Materialized {len(created)} rule-generated campaigns.")
-        _showcase_first_campaign()
-        dbmod.get_db().commit()
+        seed_data()
     print("Seed complete.")
+
+
+def seed_data():
+    """The actual seed/migration steps. Safe to call repeatedly (every
+    step checks for existing rows first) and safe to call from inside an
+    already-running app — e.g. Admin → "Sync pipeline & reference data" —
+    for hosts where a Shell tab isn't available (Render's free plan has no
+    Shell/one-off-job access) to still be able to pick up a new deploy's
+    task-template/pipeline changes without needing shell access."""
+    _seed_roles()
+    _seed_platforms()
+    type_ids = _seed_content_types()
+    _seed_task_templates(type_ids)
+    _migrate_targeted_video_pipeline(type_ids)
+    _seed_creation_options(type_ids)
+    user_ids = _seed_users()
+    _seed_scheduling_rules(type_ids)
+    _seed_ideas(user_ids)
+    created = scheduling.materialize_all_active_rules()
+    print(f"Materialized {len(created)} rule-generated campaigns.")
+    _showcase_first_campaign()
+    dbmod.get_db().commit()
 
 
 def _showcase_first_campaign():
