@@ -21,13 +21,9 @@ WEEKS_PER_FRAGMENT = 4  # weeks fetched per infinite-scroll batch
 # only the day blocks (the 1st through the last day of that month) are
 # tinted. Soft, low-saturation washes (not the earlier, punchier version) so
 # adjacent months read as a gentle variation rather than a bold color swap.
-# Pushed noticeably lighter across all three. Note for the peach specifically:
-# raising lightness while ALSO dropping saturation (what earlier attempts
-# did) is what kept making it read as grey instead of peach — lightness and
-# "how warm it looks" fight each other. Here lightness goes up but
-# saturation is kept high (65%) rather than reduced, so it stays a visibly
-# warm, pale peach instead of fading toward beige/grey.
-MONTH_TINT_COLORS = ["#f7e0d3", "#e3edf6", "#e7f4e6"]  # peach, soft blue, soft sage
+# Sampled directly from the exact swatches Jodie sent (peach / blue /
+# lavender), rather than another guessed palette.
+MONTH_TINT_COLORS = ["#fff3ed", "#f5fbff", "#f9f3fe"]  # peach, blue, lavender
 
 
 @bp.app_template_global()
