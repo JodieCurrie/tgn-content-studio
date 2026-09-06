@@ -15,6 +15,8 @@ from werkzeug.security import generate_password_hash
 
 from app import create_app, db as dbmod
 from app import scheduling
+from app import pipeline
+from app import task_engine
 
 
 DEFAULT_PASSWORD = "TGNstudio2026!"
@@ -102,27 +104,58 @@ CREATION_OPTIONS = [
     ("custom", "Custom Event", "✨", ["custom"], False),
 ]
 
-# task templates: content_type_key -> [(role_key, task_name, offset_days_before)]
-# NOTE: these are still the simple/lightweight task lists from before the
-# full production-pipeline rebuild (Part 14-18: Script Development ->
-# Concept Hashout -> Film/Record -> Edit -> Review -> Audio -> Final
-# Compilation, with real Calendar/Meet invites and Drive uploads) — that
-# automated pipeline is its own separate, not-yet-started piece of work.
-# These templates just make sure every content type has *something*
-# actionable on the calendar today.
-TASK_TEMPLATES = {
-    # ---- Targeted ----
+# The full Targeted Video production pipeline (Part 14-18): Script
+# Development -> Concept Hashout -> Film/Record -> Edit -> Review -> Audio
+# -> Final Compilation, in that exact order (Jodie's spec — Concept Hashout
+# comes after the first script draft). Script Development / Concept
+# Hashout / Film-Record are ONE SHOOT shared by both Short and Long (see
+# app/pipeline.py SHOOT_STAGE_KEYS) — they're only ever attached to
+# targeted_short's own template row, never duplicated onto targeted_long's;
+# task_engine.py skips them for any non-targeted_short output. Concept
+# Hashout and Film/Record aren't plain checklist items like the rest —
+# completing Script Development (both scripts) unlocks a "schedule this
+# meeting" action instead, and confirming the meeting happened (or
+# capturing the post-shoot editor hand-off, for Film/Record) is what
+# actually completes those two stages.
+# (role_key, task_name, offset_days_before, stage_key)
+PIPELINE_SHOOT_TEMPLATES = [
+    ("admin", "Write script", 21, "script"),
+    ("admin", "Write YouTube script", 21, "script"),
+    ("admin", "Concept hashout meeting", 17, "concept"),
+    ("production", "Film / record", 12, "film"),
+]
+
+# Production-level templates branch per output from there. Short keeps the
+# full Edit -> Review -> Audio -> Review -> Compilation loop (a musician is
+# involved); Long has no separate audio/compilation step at all — the
+# editor adds generic audio as part of editing, so Review Edit is the last
+# checkpoint before Select Highlight Reels. Review Edit/Review Audio are
+# approve/reject gates, not plain checklist items (see app/pipeline.py
+# REVIEW_STAGE_KEYS); Audio needs an explicit assign-and-send action before
+# it's a plain checklist item; Compilation/Highlights finish via an admin
+# "Mark as received" click, not a checkbox (see SUBMISSION_STAGE_KEYS).
+PIPELINE_PRODUCTION_TEMPLATES = {
     "targeted_short": [
-        ("admin", "Develop concept", 10), ("admin", "Write script", 9),
-        ("production", "Film / record", 7), ("music", "Source/create audio", 6),
-        ("production", "Edit short version & hand off to final editor", 4),
-        ("editor", "Final pass & polish", 2), ("admin", "Approve edit", 1),
-        ("admin", "Schedule & publish", 0),
+        ("production", "Edit & export", 7, "edit"),
+        ("admin", "Review edit", 5, "review_edit"),
+        ("music", "Add/record audio", 3, "audio"),
+        ("admin", "Review audio", 1, "review_audio"),
+        ("editor", "Final compilation & polish", 0, "compilation"),
     ],
     "targeted_long": [
-        ("production", "Edit long version & hand off to final editor", 4),
-        ("editor", "Final pass & polish", 2), ("admin", "Approve long edit", 1),
+        ("production", "Edit & export", 7, "edit"),
+        ("admin", "Review edit", 3, "review_edit"),
+        ("admin", "Select highlight reels", 0, "highlights"),
     ],
+}
+
+# task templates: content_type_key -> [(role_key, task_name, offset_days_before)]
+# targeted_short/targeted_long are deliberately absent here — they're seeded
+# from PIPELINE_SHOOT_TEMPLATES/PIPELINE_PRODUCTION_TEMPLATES instead (see
+# _migrate_targeted_video_pipeline).
+TASK_TEMPLATES = {
+    # ---- Targeted (highlights/repost only — the two main videos are the
+    # 7-stage pipeline above) ----
     "highlight_1": [
         ("production", "Cut highlight from source video", 2), ("production", "Export", 1),
         ("admin", "Approve & schedule", 0),
@@ -233,6 +266,7 @@ def seed():
         _seed_platforms()
         type_ids = _seed_content_types()
         _seed_task_templates(type_ids)
+        _migrate_targeted_video_pipeline(type_ids)
         _seed_creation_options(type_ids)
         user_ids = _seed_users()
         _seed_scheduling_rules(type_ids)
@@ -341,9 +375,78 @@ def _seed_task_templates(type_ids):
             continue
         for order, (role_key, name, offset) in enumerate(tasks):
             dbmod.execute(
-                "INSERT INTO task_templates (content_type_id, role_key, task_name, offset_days_before, sort_order) VALUES (?,?,?,?,?)",
+                "INSERT INTO task_templates (content_type_id, role_key, task_name, offset_days_before, sort_order, stage_key) VALUES (?,?,?,?,?,NULL)",
                 (ct_id, role_key, name, offset, order),
             )
+
+
+def _migrate_targeted_video_pipeline(type_ids):
+    """One-time migration (Part 14-18+): swaps each targeted_short/
+    targeted_long task list for the current two-tier pipeline templates
+    (shoot templates on targeted_short only; production templates per
+    type — see PIPELINE_SHOOT_TEMPLATES/PIPELINE_PRODUCTION_TEMPLATES), and
+    retrofits it onto every already-scheduled output of those two types.
+    Only ever touches tasks nobody has started yet (status='not_started')
+    — anything already in progress or done is left exactly as-is; it just
+    won't show up grouped under a stage in the new pipeline view.
+
+    Fingerprinted on a 'review_edit'-tagged template existing, since that's
+    unique to this shape (earlier shapes used a single 'review' key, or no
+    stage_key at all) — so this safely re-fires for anyone upgrading from
+    an older shape, but is a no-op once already migrated. `pipeline_stages`
+    itself is rebuilt separately and automatically at app startup (see
+    app/db.py _rebuild_pipeline_stages_v2_if_needed) — this function only
+    handles task_templates/tasks."""
+    for ct_key in pipeline.PIPELINE_CONTENT_TYPE_KEYS:
+        ct_id = type_ids.get(ct_key)
+        if not ct_id:
+            continue
+
+        already_migrated = dbmod.query_one(
+            "SELECT id FROM task_templates WHERE content_type_id = ? AND stage_key = 'review_edit'", (ct_id,)
+        )
+        if not already_migrated:
+            dbmod.execute("DELETE FROM task_templates WHERE content_type_id = ?", (ct_id,))
+            templates = list(PIPELINE_PRODUCTION_TEMPLATES.get(ct_key, []))
+            if ct_key == "targeted_short":
+                templates = list(PIPELINE_SHOOT_TEMPLATES) + templates
+            for order, (role_key, name, offset, stage_key) in enumerate(templates):
+                dbmod.execute(
+                    """INSERT INTO task_templates
+                       (content_type_id, role_key, task_name, offset_days_before, sort_order, stage_key)
+                       VALUES (?,?,?,?,?,?)""",
+                    (ct_id, role_key, name, offset, order, stage_key),
+                )
+
+        outputs = dbmod.rows_to_list(
+            dbmod.query("SELECT * FROM content_outputs WHERE content_type_id = ?", (ct_id,))
+        )
+        for output in outputs:
+            pipeline.ensure_pipeline_for_output(output["id"])
+            stale = dbmod.rows_to_list(dbmod.query(
+                """SELECT id FROM tasks WHERE output_id = ? AND created_from_template = 1
+                   AND status = 'not_started' AND stage_key IS NULL""",
+                (output["id"],),
+            ))
+            if stale:
+                for t in stale:
+                    dbmod.execute("DELETE FROM tasks WHERE id = ?", (t["id"],))
+            # Old-shaped stage-tagged tasks that no longer match any current
+            # template (e.g. the old single 'review' stage, or an old
+            # per-output 'script'/'concept'/'film' task now superseded by
+            # the shared campaign-level ones) are cleared the same
+            # not_started-only way, so generate_tasks_for_campaign can lay
+            # down the current set cleanly.
+            stale_stage_tagged = dbmod.rows_to_list(dbmod.query(
+                """SELECT id FROM tasks WHERE output_id = ? AND created_from_template = 1
+                   AND status = 'not_started' AND stage_key IS NOT NULL
+                   AND stage_key NOT IN (SELECT stage_key FROM task_templates WHERE content_type_id = ?)""",
+                (output["id"], ct_id),
+            ))
+            for t in stale_stage_tagged:
+                dbmod.execute("DELETE FROM tasks WHERE id = ?", (t["id"],))
+            if stale or stale_stage_tagged:
+                task_engine.generate_tasks_for_campaign(output["campaign_id"], only_new_output_type=ct_id)
 
 
 def _seed_creation_options(type_ids):
