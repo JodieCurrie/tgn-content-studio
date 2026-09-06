@@ -63,6 +63,20 @@
   </div>
 
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  {% if pending_pipeline_confirmations %}
+  <script>
+    // "Did this meeting happen, or does it need rescheduling?" — checked
+    // on every admin login (see auth.load_logged_in_user /
+    // pipeline.pending_confirmations_for_admin). Only the single
+    // most-overdue one opens here; resolving it re-checks for the next
+    // via openNextPipelineConfirmation() in app.js.
+    document.addEventListener("DOMContentLoaded", () => {
+      if (typeof openPipelineConfirmModal === "function") {
+        openPipelineConfirmModal({{ pending_pipeline_confirmations[0].id }});
+      }
+    });
+  </script>
+  {% endif %}
   {% block scripts %}{% endblock %}
   {% else %}
     {% block guest_content %}{% endblock %}

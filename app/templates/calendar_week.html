@@ -31,9 +31,30 @@
       </span>
     </div>
     {% endfor %}
+    {% for m in meetings_by_day.get(iso, []) %}
+    <a class="meeting-pill" href="{{ m.calendar_link or m.meet_link or '#' }}" target="_blank" rel="noopener" title="{{ m.campaign_title }}" style="margin-bottom:6px;">
+      🗓️ {{ m.label }}
+    </a>
+    {% endfor %}
   </div>
   {% endfor %}
 </div>
+
+{% if meetings_this_week %}
+<div class="section-title">Meetings this week</div>
+<div class="card" style="margin-bottom:16px;">
+  {% for m in meetings_this_week %}
+  <div class="list-row">
+    <div style="flex:1;">
+      <strong>{{ m.label }}</strong> — {{ m.campaign_title }}
+      <div class="page-subtitle" style="margin:0;">{{ m.meeting_start|friendly_datetime }}{% if m.participant_names %} · {{ m.participant_names|join(', ') }}{% endif %}</div>
+    </div>
+    {% if m.meet_link %}<a href="{{ m.meet_link }}" target="_blank" rel="noopener" class="pill">🎥 Join Meet</a>{% endif %}
+    {% if m.calendar_link %}<a href="{{ m.calendar_link }}" target="_blank" rel="noopener" class="pill">📅 Calendar</a>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
 
 <div class="section-title">Tasks due this week</div>
 <div class="card">
