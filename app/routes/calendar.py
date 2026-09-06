@@ -7,6 +7,7 @@ from .. import db
 from ..auth import login_required
 from .. import content as content_module
 from .. import analytics
+from .. import pipeline
 
 bp = Blueprint("calendar", __name__)
 
@@ -118,6 +119,30 @@ def _outputs_by_day(start, end):
     return by_day
 
 
+def _meetings_by_day(start, end):
+    """Scheduled pipeline meetings (Concept Hashout / Film-Record — shared
+    once per shoot/campaign) falling in this date range, keyed by date —
+    rendered as a small grey pill alongside the normal content cards (see
+    render_day in _calendar_macros.html and calendar_week.html)."""
+    rows = db.rows_to_list(
+        db.query(
+            """SELECT ps.id AS stage_id, ps.stage_key, ps.meeting_start, ps.meeting_end,
+                      ps.calendar_link, ps.meet_link,
+                      c.id AS campaign_id, c.title AS campaign_title
+               FROM pipeline_stages ps
+               JOIN campaigns c ON c.id = ps.campaign_id
+               WHERE ps.meeting_start IS NOT NULL
+                 AND date(ps.meeting_start) BETWEEN ? AND ?""",
+            (start.isoformat(), end.isoformat()),
+        )
+    )
+    by_day = {}
+    for r in rows:
+        r["label"] = pipeline.STAGE_BY_KEY[r["stage_key"]]["label"]
+        by_day.setdefault(r["meeting_start"][:10], []).append(r)
+    return by_day
+
+
 @bp.route("/")
 @bp.route("/calendar")
 @login_required
@@ -137,6 +162,7 @@ def month_view():
     weeks = _continuous_weeks(start_sunday, INITIAL_WEEKS)
     segments = _segment_weeks(weeks)
     by_day = _outputs_by_day(weeks[0][0], weeks[-1][-1])
+    meetings_by_day = _meetings_by_day(weeks[0][0], weeks[-1][-1])
     next_from = weeks[-1][0] + timedelta(days=7)
 
     legend = db.rows_to_list(
@@ -145,7 +171,7 @@ def month_view():
 
     return render_template(
         "calendar_month.html",
-        segments=segments, by_day=by_day, today=today,
+        segments=segments, by_day=by_day, meetings_by_day=meetings_by_day, today=today,
         jump_year=year, jump_month=month,
         next_from=next_from.isoformat(),
         cont_year=segments[-1]["year"], cont_month=segments[-1]["month"],
@@ -181,10 +207,11 @@ def month_fragment():
     weeks = _continuous_weeks(start_sunday, WEEKS_PER_FRAGMENT)
     segments = _segment_weeks(weeks, continues_year=cont_year, continues_month=cont_month)
     by_day = _outputs_by_day(weeks[0][0], weeks[-1][-1])
+    meetings_by_day = _meetings_by_day(weeks[0][0], weeks[-1][-1])
 
     return render_template(
         "partials/calendar_month_fragment.html",
-        segments=segments, by_day=by_day, today=date.today(),
+        segments=segments, by_day=by_day, meetings_by_day=meetings_by_day, today=date.today(),
     )
 
 
@@ -198,6 +225,22 @@ def week_view():
     end = start + timedelta(days=6)
     days = [start + timedelta(days=i) for i in range(7)]
     by_day = _outputs_by_day(start, end)
+    meetings_by_day = _meetings_by_day(start, end)
+    # A flat "Meetings this week" list (same data as meetings_by_day,
+    # flattened + sorted) so every participant sees it when they open the
+    # week, the same way "Tasks due this week" already isn't scoped to any
+    # one viewer — this is what satisfies "listed for everyone involved".
+    meetings_this_week = sorted(
+        (m for day_meetings in meetings_by_day.values() for m in day_meetings),
+        key=lambda m: m["meeting_start"],
+    )
+    for m in meetings_this_week:
+        m["participant_names"] = pipeline.names_for_user_ids(
+            db.from_json(
+                db.query_one("SELECT participant_user_ids FROM pipeline_stages WHERE id = ?", (m["stage_id"],))["participant_user_ids"],
+                [],
+            )
+        )
 
     tasks_this_week = db.rows_to_list(
         db.query(
@@ -213,7 +256,8 @@ def week_view():
     next_week = (start + timedelta(days=7)).isoformat()
 
     return render_template(
-        "calendar_week.html", days=days, by_day=by_day, start=start, end=end,
+        "calendar_week.html", days=days, by_day=by_day, meetings_by_day=meetings_by_day,
+        meetings_this_week=meetings_this_week, start=start, end=end,
         today=today, tasks_this_week=tasks_this_week,
         prev_week=prev_week, next_week=next_week,
     )
@@ -305,3 +349,154 @@ def campaign_panel(campaign_id):
         "partials/campaign_panel.html", c=campaign, users=users,
         content_types=content_types, platforms=platforms,
     )
+
+
+# ---------------------------------------------------------------------- pipeline: shoot-level modals (campaign-scoped)
+@bp.route("/campaigns/<int:campaign_id>/pipeline/<stage_key>/schedule-modal")
+@login_required
+def pipeline_schedule_modal(campaign_id, stage_key):
+    """Fragment for the 'Schedule this meeting' modal — also reused, with
+    the stage's current values pre-filled, for a reschedule. Concept/Film
+    are shared once per shoot, so this is campaign-scoped, not per-output."""
+    if stage_key not in pipeline.MEETING_STAGE_KEYS:
+        return "<div class='panel-empty'>Not found.</div>", 404
+    campaign = db.row_to_dict(db.query_one("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)))
+    stage = db.row_to_dict(
+        db.query_one("SELECT * FROM pipeline_stages WHERE campaign_id = ? AND stage_key = ?", (campaign_id, stage_key))
+    )
+    if not campaign or not stage:
+        return "<div class='panel-empty'>Not found.</div>", 404
+    users = db.rows_to_list(db.query("SELECT id, name FROM users WHERE active = 1 ORDER BY name"))
+    participant_ids = db.from_json(stage.get("participant_user_ids"), [])
+    return render_template(
+        "partials/schedule_meeting_modal.html",
+        campaign=campaign, stage=stage, stage_key=stage_key,
+        stage_label=pipeline.STAGE_BY_KEY[stage_key]["label"],
+        users=users, participant_ids=participant_ids,
+    )
+
+
+@bp.route("/pipeline-stages/<int:stage_id>/confirm-modal")
+@login_required
+def pipeline_confirm_modal(stage_id):
+    """Fragment for the 'Did this happen, or does it need rescheduling?'
+    modal — auto-opened on an admin's login (see base.html) for any stage
+    pending confirmation, and reusable on demand from the panel too."""
+    stage = db.row_to_dict(
+        db.query_one(
+            """SELECT ps.*, c.title AS campaign_title FROM pipeline_stages ps
+               JOIN campaigns c ON c.id = ps.campaign_id WHERE ps.id = ?""",
+            (stage_id,),
+        )
+    )
+    if not stage:
+        return "<div class='panel-empty'>Not found.</div>", 404
+    return render_template(
+        "partials/confirm_meeting_modal.html",
+        stage=stage, stage_label=pipeline.STAGE_BY_KEY[stage["stage_key"]]["label"],
+    )
+
+
+@bp.route("/pipeline-stages/<int:stage_id>/delivery-modal")
+@login_required
+def pipeline_delivery_modal(stage_id):
+    """Fragment for the editor hand-off form shown right after confirming
+    Film/Record happened — recipient is a real user now, picked from a
+    dropdown rather than typed in as free text."""
+    stage = db.row_to_dict(
+        db.query_one(
+            """SELECT ps.*, c.title AS campaign_title FROM pipeline_stages ps
+               JOIN campaigns c ON c.id = ps.campaign_id WHERE ps.id = ?""",
+            (stage_id,),
+        )
+    )
+    if not stage or stage["stage_key"] != "film":
+        return "<div class='panel-empty'>Not found.</div>", 404
+    users = db.rows_to_list(db.query("SELECT id, name FROM users WHERE active = 1 ORDER BY name"))
+    return render_template("partials/video_delivery_modal.html", stage=stage, users=users)
+
+
+# ---------------------------------------------------------------------- pipeline: production-level modals (output-scoped)
+@bp.route("/pipeline-stages/<int:stage_id>/assign-modal")
+@login_required
+def pipeline_assign_modal(stage_id):
+    """Fragment for Audio Creation's 'Assign & send' form — pick the
+    musician + a deadline, defaulting to 5 days out (or the publish date
+    minus 5, whichever is sooner, with a warning if that's tight)."""
+    stage = db.row_to_dict(
+        db.query_one(
+            """SELECT ps.*, o.publish_date, c.title AS campaign_title, c.drive_folder_link
+               FROM pipeline_stages ps JOIN content_outputs o ON o.id = ps.output_id
+               JOIN campaigns c ON c.id = o.campaign_id WHERE ps.id = ?""",
+            (stage_id,),
+        )
+    )
+    if not stage or stage["stage_key"] != "audio":
+        return "<div class='panel-empty'>Not found.</div>", 404
+    users = db.rows_to_list(db.query("SELECT id, name FROM users WHERE active = 1 ORDER BY name"))
+    publish = date.fromisoformat(stage["publish_date"])
+    default_deadline = min(date.today() + timedelta(days=5), publish - timedelta(days=5))
+    tight_deadline = default_deadline < date.today() + timedelta(days=5)
+    return render_template(
+        "partials/assign_and_notify_modal.html",
+        stage=stage, users=users, default_deadline=default_deadline.isoformat(), tight_deadline=tight_deadline,
+    )
+
+
+@bp.route("/pipeline-stages/<int:stage_id>/review-modal")
+@login_required
+def pipeline_review_modal(stage_id):
+    """Fragment for Review Edit/Review Audio's approve-or-reject form."""
+    stage = db.row_to_dict(
+        db.query_one(
+            """SELECT ps.*, c.title AS campaign_title, c.drive_folder_link
+               FROM pipeline_stages ps JOIN content_outputs o ON o.id = ps.output_id
+               JOIN campaigns c ON c.id = o.campaign_id WHERE ps.id = ?""",
+            (stage_id,),
+        )
+    )
+    if not stage or stage["stage_key"] not in pipeline.REVIEW_STAGE_KEYS:
+        return "<div class='panel-empty'>Not found.</div>", 404
+    return render_template(
+        "partials/review_decision_modal.html", stage=stage, stage_label=pipeline.STAGE_BY_KEY[stage["stage_key"]]["label"],
+    )
+
+
+@bp.route("/pipeline-stages/<int:stage_id>/submission-modal")
+@login_required
+def pipeline_submission_modal(stage_id):
+    """Fragment for Final Compilation's / Highlights' assignee-facing
+    "paste your finished link(s)" form."""
+    stage = db.row_to_dict(
+        db.query_one(
+            """SELECT ps.*, c.title AS campaign_title
+               FROM pipeline_stages ps JOIN content_outputs o ON o.id = ps.output_id
+               JOIN campaigns c ON c.id = o.campaign_id WHERE ps.id = ?""",
+            (stage_id,),
+        )
+    )
+    if not stage or stage["stage_key"] not in pipeline.SUBMISSION_STAGE_KEYS:
+        return "<div class='panel-empty'>Not found.</div>", 404
+    candidates = db.from_json(stage.get("highlight_candidates"), []) if stage["stage_key"] == "highlights" else []
+    return render_template(
+        "partials/submission_modal.html", stage=stage, stage_label=pipeline.STAGE_BY_KEY[stage["stage_key"]]["label"],
+        candidates=candidates,
+    )
+
+
+@bp.route("/pipeline-stages/<int:stage_id>/highlights-modal")
+@login_required
+def pipeline_highlights_modal(stage_id):
+    """Fragment for Jodie's 'Select Highlight Reels' candidate-timestamp
+    capture form."""
+    stage = db.row_to_dict(
+        db.query_one(
+            """SELECT ps.*, c.title AS campaign_title
+               FROM pipeline_stages ps JOIN content_outputs o ON o.id = ps.output_id
+               JOIN campaigns c ON c.id = o.campaign_id WHERE ps.id = ?""",
+            (stage_id,),
+        )
+    )
+    if not stage or stage["stage_key"] != "highlights":
+        return "<div class='panel-empty'>Not found.</div>", 404
+    return render_template("partials/highlight_candidates_modal.html", stage=stage)

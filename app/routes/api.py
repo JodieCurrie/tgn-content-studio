@@ -11,6 +11,7 @@ from .. import content as content_module
 from .. import scheduling
 from .. import task_engine
 from .. import analytics
+from .. import pipeline
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -170,12 +171,220 @@ def update_task(task_id):
     if g.user["role_is_admin"] or g.user["role_can_manage_all_content"]:
         allowed |= {"assigned_user_id"}
     fields = {k: v for k, v in data.items() if k in allowed}
+
+    # Targeted Video production pipeline (Part 14-18): a task tagged with a
+    # stage can't move off 'not_started' until every task in the stage
+    # before it is 'complete' — reject the request rather than silently
+    # letting the pipeline get out of order.
+    if "status" in fields and fields["status"] != "not_started" and not pipeline.can_advance_task(task):
+        return jsonify({"error": "This task's stage hasn't unlocked yet — the previous stage isn't complete."}), 409
+
     if fields:
         set_clause = ", ".join(f"{k} = ?" for k in fields)
         db.execute(
             f"UPDATE tasks SET {set_clause}, updated_at = datetime('now') WHERE id = ?",
             (*fields.values(), task_id),
         )
+    if "status" in fields:
+        pipeline.after_task_status_change(task_id)
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------- pipeline: shoot-level scheduling / confirm / hand-off
+@bp.route("/campaigns/<int:campaign_id>/pipeline/<stage_key>/schedule", methods=["POST"])
+@login_required
+def schedule_pipeline_meeting(campaign_id, stage_key):
+    forbidden = _admin_only()
+    if forbidden:
+        return forbidden
+    if stage_key not in pipeline.MEETING_STAGE_KEYS:
+        return jsonify({"error": "That stage isn't schedulable."}), 400
+    data = request.get_json(force=True)
+    start = data.get("start")
+    end = data.get("end")
+    if not start or not end:
+        return jsonify({"error": "Please choose a start and end time."}), 400
+    participant_ids = [int(i) for i in (data.get("participant_ids") or [])]
+    try:
+        pipeline.schedule_meeting(campaign_id, stage_key, start, end, participant_ids)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+@bp.route("/pipeline-stages/<int:stage_id>/confirm", methods=["POST"])
+@login_required
+def confirm_pipeline_stage(stage_id):
+    forbidden = _admin_only()
+    if forbidden:
+        return forbidden
+    stage = db.row_to_dict(db.query_one("SELECT * FROM pipeline_stages WHERE id = ?", (stage_id,)))
+    if not stage:
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json(force=True)
+    if not data.get("happened"):
+        return jsonify({"error": "Use the scheduling form to reschedule this meeting."}), 400
+    if stage["stage_key"] == "film":
+        return jsonify({"error": "Film/Record confirms through the edit hand-off step."}), 400
+    try:
+        pipeline.confirm_stage_happened(stage_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+@bp.route("/pipeline-stages/<int:stage_id>/confirm-with-delivery", methods=["POST"])
+@login_required
+def confirm_pipeline_stage_with_delivery(stage_id):
+    forbidden = _admin_only()
+    if forbidden:
+        return forbidden
+    data = request.get_json(force=True)
+    recipient_user_id = data.get("recipient_user_id")
+    deadline = data.get("deadline")
+    note = (data.get("note") or "").strip()
+    if not recipient_user_id or not deadline:
+        return jsonify({"error": "Please choose an editor and a deadline."}), 400
+    try:
+        pipeline.confirm_film_with_delivery(stage_id, int(recipient_user_id), deadline, note)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------- pipeline: production-level assign / review / submit
+@bp.route("/pipeline-stages/<int:stage_id>/assign", methods=["POST"])
+@login_required
+def assign_pipeline_stage(stage_id):
+    """Audio's (or Highlights' internal) assign-and-send step."""
+    forbidden = _admin_only()
+    if forbidden:
+        return forbidden
+    data = request.get_json(force=True)
+    recipient_user_id = data.get("recipient_user_id")
+    deadline = data.get("deadline")
+    note = (data.get("note") or "").strip()
+    if not recipient_user_id or not deadline:
+        return jsonify({"error": "Please choose someone and a deadline."}), 400
+    try:
+        pipeline.assign_and_notify(stage_id, int(recipient_user_id), deadline, note)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+@bp.route("/pipeline-stages/<int:stage_id>/approve", methods=["POST"])
+@login_required
+def approve_pipeline_review(stage_id):
+    forbidden = _admin_only()
+    if forbidden:
+        return forbidden
+    data = request.get_json(force=True) or {}
+    try:
+        pipeline.approve_review(stage_id, (data.get("notes") or "").strip())
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+@bp.route("/pipeline-stages/<int:stage_id>/reject", methods=["POST"])
+@login_required
+def reject_pipeline_review(stage_id):
+    forbidden = _admin_only()
+    if forbidden:
+        return forbidden
+    data = request.get_json(force=True) or {}
+    notes = (data.get("notes") or "").strip()
+    if not notes:
+        return jsonify({"error": "Please add a note explaining what needs to change."}), 400
+    try:
+        pipeline.reject_review(stage_id, notes)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+def _stage_task_owner_or_admin(stage_id):
+    """True if the current user is an admin, or is assigned the task for
+    this stage — used to let compilation's/highlights' own assignee submit
+    without needing admin rights."""
+    if g.user["role_is_admin"] or g.user["role_can_manage_all_content"]:
+        return True
+    stage = db.row_to_dict(db.query_one("SELECT * FROM pipeline_stages WHERE id = ?", (stage_id,)))
+    if not stage or not stage.get("output_id"):
+        return False
+    task = db.query_one(
+        "SELECT assigned_user_id FROM tasks WHERE output_id = ? AND stage_key = ?", (stage["output_id"], stage["stage_key"])
+    )
+    return bool(task and task["assigned_user_id"] == g.user["id"])
+
+
+@bp.route("/pipeline-stages/<int:stage_id>/submit", methods=["POST"])
+@login_required
+def submit_pipeline_stage(stage_id):
+    """Compilation's or Highlights' assignee pastes their finished Drive
+    link(s) here — this notifies Jodie but does NOT complete the stage;
+    only her explicit "Mark as received" does that (see mark_received)."""
+    if not _stage_task_owner_or_admin(stage_id):
+        return jsonify({"error": "You can only submit work assigned to you."}), 403
+    stage = db.row_to_dict(db.query_one("SELECT * FROM pipeline_stages WHERE id = ?", (stage_id,)))
+    if not stage:
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json(force=True)
+    notes = (data.get("notes") or "").strip()
+    try:
+        if stage["stage_key"] == "compilation":
+            link = (data.get("link") or "").strip()
+            if not link:
+                return jsonify({"error": "Please paste the Drive link."}), 400
+            pipeline.submit_compilation(stage_id, link, notes)
+        elif stage["stage_key"] == "highlights":
+            clips = data.get("clips") or []
+            if not clips or not any((c.get("url") or "").strip() for c in clips):
+                return jsonify({"error": "Please paste at least one clip link."}), 400
+            pipeline.submit_highlights(stage_id, clips, notes)
+        else:
+            return jsonify({"error": "This stage doesn't accept submissions."}), 400
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+@bp.route("/pipeline-stages/<int:stage_id>/mark-received", methods=["POST"])
+@login_required
+def mark_pipeline_stage_received(stage_id):
+    forbidden = _admin_only()
+    if forbidden:
+        return forbidden
+    stage = db.row_to_dict(db.query_one("SELECT * FROM pipeline_stages WHERE id = ?", (stage_id,)))
+    if not stage:
+        return jsonify({"error": "Not found"}), 404
+    try:
+        if stage["stage_key"] == "compilation":
+            pipeline.mark_compilation_received(stage_id)
+        elif stage["stage_key"] == "highlights":
+            pipeline.mark_highlights_received(stage_id)
+        else:
+            return jsonify({"error": "This stage isn't received/submitted."}), 400
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+@bp.route("/pipeline-stages/<int:stage_id>/capture-highlights", methods=["POST"])
+@login_required
+def capture_pipeline_highlights(stage_id):
+    forbidden = _admin_only()
+    if forbidden:
+        return forbidden
+    data = request.get_json(force=True)
+    candidates = data.get("candidates") or []
+    if not candidates:
+        return jsonify({"error": "Please add at least one candidate clip."}), 400
+    try:
+        pipeline.capture_highlight_candidates(stage_id, candidates, data.get("deadline") or None)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify({"ok": True})
 
 
