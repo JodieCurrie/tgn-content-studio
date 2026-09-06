@@ -1,0 +1,32 @@
+<div class="modal-header">
+  <strong style="font-size:16px;">📅 Schedule {{ stage_label }}</strong>
+  <button class="panel-close" id="modal-close-btn" style="position:static;">✕</button>
+</div>
+<div class="modal-body">
+  <div class="page-subtitle" style="margin-bottom:10px;">{{ campaign.title }} — one shoot, shared by Short &amp; YouTube.</div>
+  <form id="schedule-meeting-form" data-campaign-id="{{ campaign.id }}" data-stage-key="{{ stage_key }}">
+    <div class="form-grid" style="margin-bottom:6px;">
+      <div>
+        <label class="field-label">Start</label>
+        <input class="field-input" type="datetime-local" name="start" id="sm-start"
+               value="{{ stage.meeting_start[:16] if stage.meeting_start else '' }}" required>
+      </div>
+      <div>
+        <label class="field-label">End</label>
+        <input class="field-input" type="datetime-local" name="end" id="sm-end"
+               value="{{ stage.meeting_end[:16] if stage.meeting_end else '' }}" required>
+      </div>
+    </div>
+    <div class="page-subtitle" style="margin-bottom:14px;">Times are UTC.</div>
+
+    <label class="field-label">Participants</label>
+    <div id="sm-participants" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+      {% for u in users %}
+      <label class="checkbox-row"><input type="checkbox" name="participant_ids" value="{{ u.id }}" {{ 'checked' if u.id in participant_ids }}> {{ u.name }}</label>
+      {% endfor %}
+    </div>
+
+    <div id="sm-error" class="flash error" style="display:none;"></div>
+    <button class="btn btn-primary" type="submit" style="width:100%; justify-content:center;">Save meeting</button>
+  </form>
+</div>

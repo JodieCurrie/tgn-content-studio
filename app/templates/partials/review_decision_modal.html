@@ -1,0 +1,19 @@
+<div class="modal-header">
+  <strong style="font-size:16px;">{{ stage_label }}</strong>
+  <button class="panel-close" id="modal-close-btn" style="position:static;">✕</button>
+</div>
+<div class="modal-body">
+  <div class="page-subtitle" style="margin-bottom:10px;">{{ stage.campaign_title }}</div>
+  {% if stage.drive_folder_link %}
+  <a href="{{ stage.drive_folder_link }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline" style="margin-bottom:14px;">📁 Open Drive folder</a>
+  {% endif %}
+  <form id="review-decision-form" data-stage-id="{{ stage.id }}">
+    <label class="field-label">Notes (required to request changes; optional to approve)</label>
+    <textarea class="field-textarea" name="notes" id="rd-notes" placeholder="What needs to change..." style="margin-bottom:14px;"></textarea>
+    <div id="rd-error" class="flash error" style="display:none;"></div>
+    <div style="display:flex; gap:8px;">
+      <button type="button" class="btn btn-primary js-review-approve" data-stage-id="{{ stage.id }}" style="flex:1; justify-content:center;">✅ Approve</button>
+      <button type="button" class="btn btn-outline js-review-reject" data-stage-id="{{ stage.id }}" style="flex:1; justify-content:center;">🔁 Request changes</button>
+    </div>
+  </form>
+</div>

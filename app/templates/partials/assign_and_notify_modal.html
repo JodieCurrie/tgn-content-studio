@@ -1,0 +1,33 @@
+<div class="modal-header">
+  <strong style="font-size:16px;">🎵 Assign &amp; send — Audio Creation</strong>
+  <button class="panel-close" id="modal-close-btn" style="position:static;">✕</button>
+</div>
+<div class="modal-body">
+  <div class="page-subtitle" style="margin-bottom:10px;">{{ stage.campaign_title }} — the edit is approved. Who's adding the audio?</div>
+  <form id="assign-notify-form" data-stage-id="{{ stage.id }}">
+    <label class="field-label">Musician</label>
+    <select class="field-select" name="recipient_user_id" id="an-recipient" required style="margin-bottom:14px;">
+      <option value="">Choose someone...</option>
+      {% for u in users %}
+      <option value="{{ u.id }}">{{ u.name }}</option>
+      {% endfor %}
+    </select>
+
+    <label class="field-label">Deadline</label>
+    <input class="field-input" type="date" name="deadline" id="an-deadline" value="{{ default_deadline }}" required style="margin-bottom:6px;">
+    {% if tight_deadline %}
+    <div class="page-subtitle" style="margin-bottom:14px;">⚠️ That's less than 5 days out — this keeps the publish date as-is, just flagging it.</div>
+    {% else %}
+    <div style="margin-bottom:14px;"></div>
+    {% endif %}
+
+    <label class="field-label">Note (optional)</label>
+    <textarea class="field-textarea" name="note" id="an-note" placeholder="Anything they should know..." style="margin-bottom:14px;"></textarea>
+
+    {% if stage.drive_folder_link %}
+    <div class="page-subtitle" style="margin-bottom:10px;">They'll get the approved video from <a href="{{ stage.drive_folder_link }}" target="_blank" rel="noopener">the shared Drive folder</a> by email, plus a deadline reminder on their own calendar.</div>
+    {% endif %}
+    <div id="an-error" class="flash error" style="display:none;"></div>
+    <button class="btn btn-primary" type="submit" style="width:100%; justify-content:center;">Assign &amp; send</button>
+  </form>
+</div>

@@ -1,0 +1,26 @@
+<div class="modal-header">
+  <strong style="font-size:16px;">Hand the shoot off to an editor</strong>
+  <button class="panel-close" id="modal-close-btn" style="position:static;">✕</button>
+</div>
+<div class="modal-body">
+  <div class="page-subtitle" style="margin-bottom:10px;">{{ stage.campaign_title }} — Film/Record confirmed. This assigns Edit on BOTH outputs (Short and YouTube) to the same editor.</div>
+  <form id="video-delivery-form" data-stage-id="{{ stage.id }}">
+    <label class="field-label">Editor</label>
+    <select class="field-select" name="recipient_user_id" id="vd-recipient" required style="margin-bottom:14px;">
+      <option value="">Choose someone...</option>
+      {% for u in users %}
+      <option value="{{ u.id }}">{{ u.name }}</option>
+      {% endfor %}
+    </select>
+
+    <label class="field-label">Deadline</label>
+    <input class="field-input" type="date" name="deadline" id="vd-deadline" required style="margin-bottom:14px;">
+
+    <label class="field-label">Note (optional)</label>
+    <textarea class="field-textarea" name="note" id="vd-note" placeholder="Anything they should know..." style="margin-bottom:14px;"></textarea>
+
+    <div class="page-subtitle" style="margin-bottom:10px;">They'll get an email with the shared Drive folder link and a deadline reminder on their own calendar — this doesn't add anything to yours.</div>
+    <div id="vd-error" class="flash error" style="display:none;"></div>
+    <button class="btn btn-primary" type="submit" style="width:100%; justify-content:center;">Send &amp; complete stage</button>
+  </form>
+</div>

@@ -1,0 +1,28 @@
+<div class="modal-header">
+  <strong style="font-size:16px;">{{ stage_label }} — submit</strong>
+  <button class="panel-close" id="modal-close-btn" style="position:static;">✕</button>
+</div>
+<div class="modal-body">
+  <div class="page-subtitle" style="margin-bottom:10px;">{{ stage.campaign_title }} — paste the Drive link(s) once you've uploaded to the shared folder.</div>
+  <form id="submission-form" data-stage-id="{{ stage.id }}" data-stage-key="{{ stage.stage_key }}">
+    {% if stage.stage_key == 'compilation' %}
+    <label class="field-label">Final video link</label>
+    <input class="field-input" type="url" name="link" id="sub-link" placeholder="https://drive.google.com/..." required style="margin-bottom:14px;">
+    {% else %}
+    {% for cand in candidates %}
+    <label class="field-label">{{ cand.label or ('Clip ' ~ loop.index) }}{% if cand.start or cand.end %} ({{ cand.start }}–{{ cand.end }}){% endif %}</label>
+    <input class="field-input js-sub-clip" data-label="{{ cand.label or ('Clip ' ~ loop.index) }}" type="url" placeholder="https://drive.google.com/..." style="margin-bottom:14px;">
+    {% else %}
+    <label class="field-label">Clip link</label>
+    <input class="field-input js-sub-clip" data-label="Clip 1" type="url" placeholder="https://drive.google.com/..." style="margin-bottom:14px;">
+    {% endfor %}
+    {% endif %}
+
+    <label class="field-label">Notes (optional)</label>
+    <textarea class="field-textarea" name="notes" id="sub-notes" style="margin-bottom:14px;"></textarea>
+
+    <div class="page-subtitle" style="margin-bottom:10px;">This notifies Jodie — she'll click "Mark as received" once she's grabbed it.</div>
+    <div id="sub-error" class="flash error" style="display:none;"></div>
+    <button class="btn btn-primary" type="submit" style="width:100%; justify-content:center;">Send to Jodie</button>
+  </form>
+</div>

@@ -1,0 +1,17 @@
+<div class="modal-header">
+  <strong style="font-size:16px;">{{ stage_label }}</strong>
+  <button class="panel-close" id="modal-close-btn" style="position:static;">✕</button>
+</div>
+<div class="modal-body">
+  <div class="page-subtitle" style="margin-bottom:6px;">{{ stage.campaign_title }}</div>
+  <p style="font-size:14px; margin:0 0 16px;">Did the {{ stage_label }} scheduled for {{ stage.meeting_start|friendly_datetime }} happen?</p>
+  <div id="cm-error" class="flash error" style="display:none;"></div>
+  <div style="display:flex; gap:8px;">
+    <button type="button" class="btn btn-primary js-confirm-yes"
+            data-stage-id="{{ stage.id }}" data-stage-key="{{ stage.stage_key }}"
+            style="flex:1; justify-content:center;">✅ Yes, it happened</button>
+    <button type="button" class="btn btn-outline js-confirm-no"
+            data-stage-id="{{ stage.id }}" data-campaign-id="{{ stage.campaign_id }}" data-stage-key="{{ stage.stage_key }}"
+            style="flex:1; justify-content:center;">🔁 No, reschedule</button>
+  </div>
+</div>

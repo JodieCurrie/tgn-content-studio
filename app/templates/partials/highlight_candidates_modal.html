@@ -1,0 +1,28 @@
+<div class="modal-header">
+  <strong style="font-size:16px;">🎬 Select Highlight Reels</strong>
+  <button class="panel-close" id="modal-close-btn" style="position:static;">✕</button>
+</div>
+<div class="modal-body">
+  <div class="page-subtitle" style="margin-bottom:10px;">{{ stage.campaign_title }} — pick 2-3 candidate clips for the editor to cut. These feed directly into Highlight/Snippet 1 &amp; 2.</div>
+  <form id="highlights-capture-form" data-stage-id="{{ stage.id }}">
+    <div id="hc-rows">
+      {% for i in range(2) %}
+      <div class="hc-row" style="border:1px solid var(--border); border-radius:8px; padding:8px; margin-bottom:8px;">
+        <input class="field-input hc-label" placeholder="Label (e.g. Highlight 1)" style="margin-bottom:6px;">
+        <div class="form-grid" style="margin-bottom:6px;">
+          <input class="field-input hc-start" placeholder="Start (e.g. 3:15)">
+          <input class="field-input hc-end" placeholder="End (e.g. 3:45)">
+        </div>
+        <input class="field-input hc-notes" placeholder="Notes (optional)">
+      </div>
+      {% endfor %}
+    </div>
+    <button type="button" class="btn btn-sm btn-outline" id="hc-add-row" style="margin-bottom:14px;">+ Add another candidate</button>
+
+    <label class="field-label">Deadline for the cuts (optional — defaults to a couple days before publish)</label>
+    <input class="field-input" type="date" name="deadline" id="hc-deadline" style="margin-bottom:14px;">
+
+    <div id="hc-error" class="flash error" style="display:none;"></div>
+    <button class="btn btn-primary" type="submit" style="width:100%; justify-content:center;">Send to editor</button>
+  </form>
+</div>

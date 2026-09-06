@@ -2,7 +2,7 @@
    "load more months" fragments (calendar.js infinite scroll) produce
    byte-identical markup. #}
 
-{% macro render_day(day, by_day, today, month) %}
+{% macro render_day(day, by_day, today, month, meetings_by_day={}) %}
 {% set iso = day.isoformat() %}
 <div class="calendar-day {{ 'today' if day == today }} {{ 'other-month' if day.month != month }}" data-date="{{ iso }}"
      style="--month-tint: {{ month_tint_color(day.month) }};">
@@ -22,10 +22,18 @@
     </span>
   </div>
   {% endfor %}
+  {# Scheduled pipeline meetings (Concept Hashout / Film-Record) — a small
+     neutral pill, deliberately not a .content-card so it's excluded from
+     the drag/drop and card-click handlers keyed off data-output-id. #}
+  {% for m in meetings_by_day.get(iso, []) %}
+  <a class="meeting-pill" href="{{ m.calendar_link or m.meet_link or '#' }}" target="_blank" rel="noopener" title="{{ m.campaign_title }}">
+    🗓️ {{ m.label }}
+  </a>
+  {% endfor %}
 </div>
 {% endmacro %}
 
-{% macro render_week_segment(segment, by_day, today) %}
+{% macro render_week_segment(segment, by_day, today, meetings_by_day={}) %}
 {# One vertical, rotated month label spanning every week-row that belongs
    to it, followed immediately by those weeks' day cells — no divider row,
    no week ever rendered twice. Grid auto-placement flows the day cells
@@ -36,7 +44,7 @@
 </div>
 {% for week in segment.weeks %}
   {% for day in week %}
-    {{ render_day(day, by_day, today, segment.month) }}
+    {{ render_day(day, by_day, today, segment.month, meetings_by_day) }}
   {% endfor %}
 {% endfor %}
 {% endmacro %}

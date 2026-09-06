@@ -33,6 +33,73 @@
     {% endif %}
   </div>
 
+  {% if c.shoot_stages %}
+  {# Shared shoot-level tracker (Part 14-18+): Script Development, Concept
+     Hashout and Film/Record happen ONCE per shoot — covering both the
+     Short and YouTube outputs at once — so this renders a single time
+     above the per-output trackers, not once per output. #}
+  <div class="panel-section">
+    <h4>The shoot</h4>
+    {% for stage in c.shoot_stages %}
+    <div style="margin-bottom:8px; {{ 'opacity:0.5;' if not stage.unlocked }}">
+      <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+        <span class="status-dot status-{{ 'complete' if stage.status == 'complete' else ('scheduled' if stage.status == 'in_progress' else 'idea') }}"></span>
+        <strong style="font-size:13px;">{{ stage.label }}</strong>
+        {% if not stage.unlocked %}<span class="page-subtitle">🔒 locked until the previous stage is complete</span>{% endif %}
+      </div>
+
+      {% if stage.stage_key == 'script' and stage.unlocked and stage.status != 'complete' %}
+      <div class="page-subtitle" style="padding-left:18px; margin:2px 0 4px;">Add both scripts below (Script/Outline and the YouTube script) before marking these done.</div>
+      {% endif %}
+
+      {% if stage.is_meeting_stage and stage.unlocked %}
+        {% if stage.needs_scheduling %}
+        <div style="padding-left:18px; margin-top:2px;">
+          <button type="button" class="btn btn-sm btn-outline js-schedule-meeting" data-campaign-id="{{ c.id }}" data-stage-key="{{ stage.stage_key }}">📅 Schedule this meeting</button>
+        </div>
+        {% elif stage.needs_confirmation %}
+        <div style="padding-left:18px; margin-top:2px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+          <span class="page-subtitle">⏳ {{ stage.meeting_start|friendly_datetime }} has passed — awaiting confirmation</span>
+          <button type="button" class="btn btn-sm btn-outline js-confirm-meeting" data-stage-id="{{ stage.id }}">Did this happen?</button>
+        </div>
+        {% elif stage.scheduled_upcoming %}
+        <div style="padding-left:18px; margin-top:2px;">
+          <div class="page-subtitle">{{ stage.meeting_start|friendly_datetime }}{% if stage.participant_names %} · {{ stage.participant_names|join(', ') }}{% endif %}</div>
+          <div style="display:flex; gap:6px; margin-top:2px; flex-wrap:wrap;">
+            {% if stage.meet_link %}<a href="{{ stage.meet_link }}" target="_blank" rel="noopener" class="pill">🎥 Join Meet</a>{% endif %}
+            {% if stage.calendar_link %}<a href="{{ stage.calendar_link }}" target="_blank" rel="noopener" class="pill">📅 Calendar</a>{% endif %}
+            <button type="button" class="btn btn-sm btn-ghost js-schedule-meeting" data-campaign-id="{{ c.id }}" data-stage-key="{{ stage.stage_key }}">Reschedule</button>
+          </div>
+        </div>
+        {% endif %}
+        {% if stage.status == 'complete' %}
+        <div class="page-subtitle" style="padding-left:18px;">
+          {{ stage.meeting_start|friendly_datetime }}{% if stage.participant_names %} · {{ stage.participant_names|join(', ') }}{% endif %}
+          {% if stage.calendar_link %} · <a href="{{ stage.calendar_link }}" target="_blank" rel="noopener">Calendar</a>{% endif %}
+        </div>
+        {% if stage.stage_key == 'film' and stage.recipient_name %}
+        <div class="page-subtitle" style="padding-left:18px;">Edit assigned to {{ stage.recipient_name }}, due {{ stage.delivery_deadline|friendly_date }}{% if not stage.delivery_email_sent_at %} — email wasn't sent, let them know directly{% endif %}.</div>
+        {% endif %}
+        {% endif %}
+      {% else %}
+      {% for t in stage.tasks %}
+      <div class="list-row" style="padding:4px 0 4px 18px; cursor:default;">
+        <input type="checkbox" class="js-task-complete" data-task-id="{{ t.id }}" {{ 'checked' if t.status == 'complete' }} {{ 'disabled' if not stage.unlocked }}>
+        <div style="flex:1;">
+          <span style="font-size:13px;">{{ t.task_name }}</span>
+          <div class="page-subtitle" style="margin:0;">{% if t.due_date %}Due {{ t.due_date|friendly_date }}{% endif %}{% if t.assigned_name %} · {{ t.assigned_name }}{% endif %}</div>
+        </div>
+      </div>
+      {% endfor %}
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% if c.drive_folder_link %}
+    <a href="{{ c.drive_folder_link }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline" style="margin-top:2px;">📁 Open Drive folder</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {% if c.outputs %}
   <div class="panel-section">
     <h4>Outputs ({{ c.outputs|length }})</h4>
@@ -53,6 +120,121 @@
         </select>
         {% if o.assigned_name %}<span class="page-subtitle">Assigned: {{ o.assigned_name }}</span>{% endif %}
       </div>
+
+      {% if o.pipeline_stages %}
+      {# Production-level pipeline (Part 14-18+), branching per output from
+         the shared shoot tracker above: Edit -> Review Edit -> [Short: Audio
+         -> Review Audio -> Final Compilation] / [Long: Select Highlight
+         Reels]. Edit/Audio are plain checklists once assigned; Review
+         stages are an approve/reject gate; Compilation/Highlights finish
+         via an admin "Mark as received" click, not a checkbox. #}
+      <div style="margin-top:10px; border-top:1px solid var(--border); padding-top:8px;">
+        <div class="page-subtitle" style="font-weight:700; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">Production</div>
+        {% for stage in o.pipeline_stages %}
+        <div style="margin-bottom:8px; {{ 'opacity:0.5;' if not stage.unlocked }}">
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <span class="status-dot status-{{ 'complete' if stage.status == 'complete' else ('scheduled' if stage.status == 'in_progress' else 'idea') }}"></span>
+            <strong style="font-size:13px;">{{ stage.label }}</strong>
+            {% if not stage.unlocked %}<span class="page-subtitle">🔒 locked until the previous stage is complete</span>{% endif %}
+          </div>
+
+          {% if stage.is_review_stage and stage.unlocked %}
+            {% if stage.status == 'complete' %}
+            <div class="page-subtitle" style="padding-left:18px;">✅ Approved{% if stage.review_notes %} — {{ stage.review_notes }}{% endif %}</div>
+            {% else %}
+            <div style="padding-left:18px; margin-top:2px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              {% if stage.review_decision == 'rejected' %}<span class="page-subtitle">🔁 Changes requested — waiting on resubmission</span>{% else %}<span class="page-subtitle">⏳ Awaiting your review</span>{% endif %}
+              <button type="button" class="btn btn-sm btn-outline js-open-review" data-stage-id="{{ stage.id }}">Review</button>
+            </div>
+            {% endif %}
+
+          {% elif stage.stage_key == 'audio' and stage.unlocked %}
+            {% if stage.needs_assignment %}
+            <div style="padding-left:18px; margin-top:2px;">
+              <button type="button" class="btn btn-sm btn-outline js-open-assign" data-stage-id="{{ stage.id }}">🎵 Assign &amp; send</button>
+            </div>
+            {% else %}
+            {% for t in stage.tasks %}
+            <div class="list-row" style="padding:4px 0 4px 18px; cursor:default;">
+              <input type="checkbox" class="js-task-complete" data-task-id="{{ t.id }}" {{ 'checked' if t.status == 'complete' }} {{ 'disabled' if not stage.unlocked }}>
+              <div style="flex:1;">
+                <span style="font-size:13px;">{{ t.task_name }}</span>
+                <div class="page-subtitle" style="margin:0;">{% if t.due_date %}Due {{ t.due_date|friendly_date }}{% endif %}{% if t.assigned_name %} · {{ t.assigned_name }}{% endif %}</div>
+              </div>
+            </div>
+            {% endfor %}
+            {% endif %}
+
+          {% elif stage.stage_key == 'compilation' and stage.unlocked %}
+            {% if stage.status == 'complete' %}
+            <div class="page-subtitle" style="padding-left:18px;">✅ Received{% if stage.submission_link %} — <a href="{{ stage.submission_link }}" target="_blank" rel="noopener">final video</a>{% endif %}</div>
+            {% elif stage.has_submission %}
+            <div style="padding-left:18px; margin-top:2px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <a href="{{ stage.submission_link }}" target="_blank" rel="noopener" class="pill">🎬 Final video</a>
+              {% if current_user.role_is_admin or current_user.role_can_manage_all_content %}
+              <button type="button" class="btn btn-sm btn-primary js-mark-received" data-stage-id="{{ stage.id }}">✅ Mark as received</button>
+              {% else %}
+              <span class="page-subtitle">Submitted — awaiting Jodie</span>
+              {% endif %}
+            </div>
+            {% else %}
+            {% set comp_task = stage.tasks[0] if stage.tasks else None %}
+            <div style="padding-left:18px; margin-top:2px;">
+              {% if comp_task and comp_task.assigned_user_id == current_user.id %}
+              <button type="button" class="btn btn-sm btn-outline js-open-submit" data-stage-id="{{ stage.id }}">Submit final video</button>
+              {% else %}
+              <span class="page-subtitle">Waiting on {{ comp_task.assigned_name if comp_task and comp_task.assigned_name else 'the editor' }}</span>
+              {% endif %}
+            </div>
+            {% endif %}
+
+          {% elif stage.stage_key == 'highlights' and stage.unlocked %}
+            {% if stage.status == 'complete' %}
+            <div class="page-subtitle" style="padding-left:18px;">✅ Received — clips attached to Highlight/Snippet 1 &amp; 2</div>
+            {% elif stage.has_submission %}
+            <div style="padding-left:18px; margin-top:2px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              {% for clip in stage.submitted_clips %}<a href="{{ clip.url }}" target="_blank" rel="noopener" class="pill">🎬 {{ clip.label or 'Clip' }}</a>{% endfor %}
+              {% if current_user.role_is_admin or current_user.role_can_manage_all_content %}
+              <button type="button" class="btn btn-sm btn-primary js-mark-received" data-stage-id="{{ stage.id }}">✅ Mark as received</button>
+              {% else %}
+              <span class="page-subtitle">Submitted — awaiting Jodie</span>
+              {% endif %}
+            </div>
+            {% elif stage.needs_submission %}
+            {% set hl_task = stage.tasks[0] if stage.tasks else None %}
+            <div style="padding-left:18px; margin-top:2px;">
+              {% if hl_task and hl_task.assigned_user_id == current_user.id %}
+              <button type="button" class="btn btn-sm btn-outline js-open-submit" data-stage-id="{{ stage.id }}">Submit cuts</button>
+              {% else %}
+              <span class="page-subtitle">Waiting on {{ hl_task.assigned_name if hl_task and hl_task.assigned_name else 'the editor' }}</span>
+              {% endif %}
+            </div>
+            {% elif stage.needs_capture and (current_user.role_is_admin or current_user.role_can_manage_all_content) %}
+            <div style="padding-left:18px; margin-top:2px;">
+              <button type="button" class="btn btn-sm btn-outline js-open-highlights" data-stage-id="{{ stage.id }}">🎬 Select highlight reels</button>
+            </div>
+            {% endif %}
+
+          {% else %}
+          {% for t in stage.tasks %}
+          <div class="list-row" style="padding:4px 0 4px 18px; cursor:default;">
+            <input type="checkbox" class="js-task-complete" data-task-id="{{ t.id }}" {{ 'checked' if t.status == 'complete' }} {{ 'disabled' if not stage.unlocked }}>
+            <div style="flex:1;">
+              <span style="font-size:13px;">{{ t.task_name }}</span>
+              <div class="page-subtitle" style="margin:0;">{% if t.due_date %}Due {{ t.due_date|friendly_date }}{% endif %}{% if t.assigned_name %} · {{ t.assigned_name }}{% endif %}</div>
+            </div>
+            <select class="field-select js-task-status" data-task-id="{{ t.id }}" style="width:auto;" {{ 'disabled' if not stage.unlocked }}>
+              {% for s in ['not_started','in_progress','waiting','submitted','changes_requested','approved','complete'] %}
+              <option value="{{ s }}" {{ 'selected' if t.status == s }}>{{ s|status_label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% endfor %}
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
     </div>
     {% endfor %}
   </div>
@@ -67,6 +249,13 @@
     <h4>Script / outline</h4>
     <textarea class="field-textarea js-autosave" data-campaign-id="{{ c.id }}" data-field="script" placeholder="Script or outline...">{{ c.script }}</textarea>
   </div>
+
+  {% if c.shoot_stages %}
+  <div class="panel-section">
+    <h4>YouTube script</h4>
+    <textarea class="field-textarea js-autosave" data-campaign-id="{{ c.id }}" data-field="script_youtube" placeholder="The longer, YouTube-specific version...">{{ c.script_youtube }}</textarea>
+  </div>
+  {% endif %}
 
   <div class="panel-section">
     <h4>Bible references</h4>
