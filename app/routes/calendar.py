@@ -14,25 +14,12 @@ WEEKDAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 INITIAL_WEEKS = 14   # how many weeks render before the user has to scroll (~3 months)
 WEEKS_PER_FRAGMENT = 4  # weeks fetched per infinite-scroll batch
 
-# A per-calendar-month color rotation (Jan..Dec, index 0..11), like Jodie's
-# original Excel calendar where each month had its own shade. `rail` is the
-# solid color for the vertical month-name strip; `tint` is a very light wash
-# of the same hue used on that month's own day cells. Same month = same
-# color every year. (rail_color, tint_color)
-MONTH_COLORS = [
-    ("#bdd4e4", "#edf4f9"),  # January
-    ("#bdc1e4", "#edeef9"),  # February
-    ("#cdbde4", "#f2edf9"),  # March
-    ("#e1bde4", "#f8edf9"),  # April
-    ("#e4bdd4", "#f9edf4"),  # May
-    ("#e4bdc1", "#f9edee"),  # June
-    ("#e4cdbd", "#f9f2ed"),  # July
-    ("#e4e1bd", "#f9f8ed"),  # August
-    ("#d4e4bd", "#f4f9ed"),  # September
-    ("#c1e4bd", "#eef9ed"),  # October
-    ("#bde4cd", "#edf9f2"),  # November
-    ("#bde4e1", "#edf9f8"),  # December
-]
+# A repeating 3-color pastel rotation across the day cells themselves (like
+# Jodie's Excel calendar), keyed by calendar month so the same month always
+# gets the same color every year (Jan/Apr/Jul/Oct share one, Feb/May/Aug/Nov
+# another, Mar/Jun/Sep/Dec the third). The month-name rail stays neutral —
+# only the day blocks (the 1st through the last day of that month) are tinted.
+MONTH_TINT_COLORS = ["#c7deee", "#eec7d4", "#c7eece"]  # blue, pink, green
 
 
 def _sunday_on_or_before(d):
@@ -64,22 +51,33 @@ def _week_owner_month(week):
     return max(counts.items(), key=lambda kv: kv[1])[0]
 
 
-def _segment_weeks(weeks):
+def _segment_weeks(weeks, continues_year=None, continues_month=None):
     """Group consecutive weeks under whichever month owns each one, so the
     month name can be rendered once, spanning those rows in a narrow side
     rail (rotated text, like Jodie's original Excel calendar) — instead of a
     full-width divider row that forced each month to re-render its own
-    boundary week and duplicate it."""
+    boundary week and duplicate it.
+
+    `continues_year`/`continues_month` identify the month the *previously
+    rendered* batch of weeks ended on (the infinite-scroll fragment endpoint
+    is a fresh call each time, so without this a month split across two
+    fetches would otherwise get its name rendered twice in a row — once at
+    the bottom of one batch and again at the top of the next). When the
+    first segment here is that same month, it's marked `continuation` so the
+    template renders an unlabeled rail block that just extends the strip."""
     segments = []
     for week in weeks:
         year, month = _week_owner_month(week)
         if segments and (segments[-1]["year"], segments[-1]["month"]) == (year, month):
             segments[-1]["weeks"].append(week)
         else:
-            rail_color, tint_color = MONTH_COLORS[month - 1]
+            tint_color = MONTH_TINT_COLORS[(month - 1) % 3]
+            continuation = (
+                not segments and year == continues_year and month == continues_month
+            )
             segments.append({
                 "year": year, "month": month, "month_name": pycal.month_name[month], "weeks": [week],
-                "rail_color": rail_color, "tint_color": tint_color,
+                "tint_color": tint_color, "continuation": continuation,
             })
     return segments
 
@@ -137,6 +135,7 @@ def month_view():
         segments=segments, by_day=by_day, today=today,
         jump_year=year, jump_month=month,
         next_from=next_from.isoformat(),
+        cont_year=segments[-1]["year"], cont_month=segments[-1]["month"],
         weekday_headers=WEEKDAY_HEADERS,
         legend=legend,
     )
@@ -149,7 +148,10 @@ def month_fragment():
     calendar.js to append as the user scrolls further down. `from` must be
     an ISO date that falls on a Sunday — calendar.js always hands back
     exactly the date this view last reported as `next_from`, so the flow of
-    weeks never skips or repeats one."""
+    weeks never skips or repeats one. `cont_year`/`cont_month` (also handed
+    back by the previous batch) identify the month the rail strip currently
+    ends on, so a month split across this fetch boundary doesn't get its
+    name rendered a second time right under itself."""
     from_str = request.args.get("from")
     if not from_str:
         return "", 400
@@ -160,8 +162,11 @@ def month_fragment():
     if start_sunday.weekday() != 6:  # Python Sunday = 6
         return "", 400
 
+    cont_year = request.args.get("cont_year", type=int)
+    cont_month = request.args.get("cont_month", type=int)
+
     weeks = _continuous_weeks(start_sunday, WEEKS_PER_FRAGMENT)
-    segments = _segment_weeks(weeks)
+    segments = _segment_weeks(weeks, continues_year=cont_year, continues_month=cont_month)
     by_day = _outputs_by_day(weeks[0][0], weeks[-1][-1])
 
     return render_template(
