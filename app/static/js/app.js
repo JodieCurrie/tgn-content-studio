@@ -39,6 +39,15 @@ function closePanel() {
   panelBackdrop.classList.remove("open");
 }
 
+// A task status change can unlock the next pipeline stage (new Calendar/
+// Meet/Drive links, previously-disabled controls becoming editable) — the
+// simplest correct thing is to just re-render the whole open panel rather
+// than hand-patch every affected bit of the DOM.
+function refreshPipelinePanel() {
+  const body = panelEl && panelEl.querySelector(".panel-body[data-campaign-id]");
+  if (body && body.dataset.campaignId) openCampaignPanel(body.dataset.campaignId);
+}
+
 panelBackdrop && panelBackdrop.addEventListener("click", closePanel);
 
 document.addEventListener("click", (e) => {
@@ -192,15 +201,31 @@ function saveField(el) {
 // ---------------------------------------------------------------- tasks
 document.addEventListener("change", (e) => {
   if (e.target.classList.contains("js-task-status")) {
-    tgnFetch(`/api/tasks/${e.target.dataset.taskId}`, {
-      method: "PATCH", body: JSON.stringify({ status: e.target.value }),
-    }).catch(() => {});
+    const el = e.target;
+    const previous = el.dataset.prevValue || "not_started";
+    tgnFetch(`/api/tasks/${el.dataset.taskId}`, {
+      method: "PATCH", body: JSON.stringify({ status: el.value }),
+    }).then(() => {
+      el.dataset.prevValue = el.value;
+      if (typeof refreshPipelinePanel === "function") refreshPipelinePanel();
+    }).catch((err) => {
+      // Most likely the pipeline gating rejection (409) — revert the
+      // dropdown rather than leaving it showing a change that didn't save.
+      el.value = previous;
+      alert(err.message);
+    });
   }
   if (e.target.classList.contains("js-task-complete")) {
-    const status = e.target.checked ? "complete" : "not_started";
-    tgnFetch(`/api/tasks/${e.target.dataset.taskId}`, {
+    const el = e.target;
+    const status = el.checked ? "complete" : "not_started";
+    tgnFetch(`/api/tasks/${el.dataset.taskId}`, {
       method: "PATCH", body: JSON.stringify({ status }),
-    }).catch(() => {});
+    }).then(() => {
+      if (typeof refreshPipelinePanel === "function") refreshPipelinePanel();
+    }).catch((err) => {
+      el.checked = !el.checked;
+      alert(err.message);
+    });
   }
   if (e.target.classList.contains("js-output-status")) {
     tgnFetch(`/api/outputs/${e.target.dataset.outputId}`, {
@@ -238,6 +263,226 @@ document.addEventListener("submit", async (e) => {
     const campaignId = e.target.dataset.campaignId;
     await fetch(`/api/campaigns/${campaignId}/assets`, { method: "POST", body: fd });
     openCampaignPanel(campaignId);
+  }
+});
+
+// ---------------------------------------------------------------- pipeline: shoot-level (meeting scheduling / confirm / hand-off)
+function openPipelineConfirmModal(stageId) {
+  fetch(`/pipeline-stages/${stageId}/confirm-modal`).then(r => r.text()).then(html => openModal(html));
+}
+
+document.addEventListener("click", (e) => {
+  const scheduleBtn = e.target.closest(".js-schedule-meeting");
+  if (scheduleBtn) {
+    const { campaignId, stageKey } = scheduleBtn.dataset;
+    fetch(`/campaigns/${campaignId}/pipeline/${stageKey}/schedule-modal`).then(r => r.text()).then(html => openModal(html));
+  }
+  const confirmBtn = e.target.closest(".js-confirm-meeting");
+  if (confirmBtn) {
+    openPipelineConfirmModal(confirmBtn.dataset.stageId);
+  }
+  const yesBtn = e.target.closest(".js-confirm-yes");
+  if (yesBtn) {
+    const { stageId, stageKey } = yesBtn.dataset;
+    if (stageKey === "film") {
+      // Film/Record's "yes" chains straight into capturing the editor
+      // hand-off — that submission is what actually completes the stage.
+      fetch(`/pipeline-stages/${stageId}/delivery-modal`).then(r => r.text()).then(html => openModal(html));
+    } else {
+      tgnFetch(`/api/pipeline-stages/${stageId}/confirm`, {
+        method: "POST", body: JSON.stringify({ happened: true }),
+      }).then(() => {
+        // A full reload (rather than a panel-only refresh) so any other
+        // stage now past its own meeting time re-prompts immediately, the
+        // same way it would on a fresh login.
+        window.location.reload();
+      }).catch((err) => {
+        const box = document.getElementById("cm-error");
+        if (box) { box.textContent = err.message; box.style.display = "block"; }
+      });
+    }
+  }
+  const noBtn = e.target.closest(".js-confirm-no");
+  if (noBtn) {
+    const { campaignId, stageKey } = noBtn.dataset;
+    fetch(`/campaigns/${campaignId}/pipeline/${stageKey}/schedule-modal`).then(r => r.text()).then(html => openModal(html));
+  }
+
+  // -------------------------------------------------------------- pipeline: production-level (review / assign / submit / highlights)
+  const reviewBtn = e.target.closest(".js-open-review");
+  if (reviewBtn) {
+    fetch(`/pipeline-stages/${reviewBtn.dataset.stageId}/review-modal`).then(r => r.text()).then(html => openModal(html));
+  }
+  const assignBtn = e.target.closest(".js-open-assign");
+  if (assignBtn) {
+    fetch(`/pipeline-stages/${assignBtn.dataset.stageId}/assign-modal`).then(r => r.text()).then(html => openModal(html));
+  }
+  const submitBtn = e.target.closest(".js-open-submit");
+  if (submitBtn) {
+    fetch(`/pipeline-stages/${submitBtn.dataset.stageId}/submission-modal`).then(r => r.text()).then(html => openModal(html));
+  }
+  const highlightsBtn = e.target.closest(".js-open-highlights");
+  if (highlightsBtn) {
+    fetch(`/pipeline-stages/${highlightsBtn.dataset.stageId}/highlights-modal`).then(r => r.text()).then(html => openModal(html));
+  }
+  const markReceivedBtn = e.target.closest(".js-mark-received");
+  if (markReceivedBtn) {
+    const stageId = markReceivedBtn.dataset.stageId;
+    tgnFetch(`/api/pipeline-stages/${stageId}/mark-received`, { method: "POST", body: "{}" })
+      .then(() => window.location.reload())
+      .catch((err) => alert(err.message));
+  }
+  const approveBtn = e.target.closest(".js-review-approve");
+  if (approveBtn) {
+    const stageId = approveBtn.dataset.stageId;
+    const notes = (document.getElementById("rd-notes") || {}).value || "";
+    tgnFetch(`/api/pipeline-stages/${stageId}/approve`, { method: "POST", body: JSON.stringify({ notes }) })
+      .then(() => window.location.reload())
+      .catch((err) => {
+        const box = document.getElementById("rd-error");
+        if (box) { box.textContent = err.message; box.style.display = "block"; }
+      });
+  }
+  const rejectBtn = e.target.closest(".js-review-reject");
+  if (rejectBtn) {
+    const stageId = rejectBtn.dataset.stageId;
+    const notesEl = document.getElementById("rd-notes");
+    const notes = (notesEl && notesEl.value || "").trim();
+    const box = document.getElementById("rd-error");
+    if (!notes) {
+      if (box) { box.textContent = "Please add a note explaining what needs to change."; box.style.display = "block"; }
+      return;
+    }
+    tgnFetch(`/api/pipeline-stages/${stageId}/reject`, { method: "POST", body: JSON.stringify({ notes }) })
+      .then(() => window.location.reload())
+      .catch((err) => {
+        if (box) { box.textContent = err.message; box.style.display = "block"; }
+      });
+  }
+  const hcAddRow = e.target.closest("#hc-add-row");
+  if (hcAddRow) {
+    const rows = document.getElementById("hc-rows");
+    const row = document.createElement("div");
+    row.className = "hc-row";
+    row.style.cssText = "border:1px solid var(--border); border-radius:8px; padding:8px; margin-bottom:8px;";
+    row.innerHTML = `
+      <input class="field-input hc-label" placeholder="Label" style="margin-bottom:6px;">
+      <div class="form-grid" style="margin-bottom:6px;">
+        <input class="field-input hc-start" placeholder="Start (e.g. 3:15)">
+        <input class="field-input hc-end" placeholder="End (e.g. 3:45)">
+      </div>
+      <input class="field-input hc-notes" placeholder="Notes (optional)">`;
+    rows.appendChild(row);
+  }
+});
+
+document.addEventListener("submit", async (e) => {
+  if (e.target.id === "schedule-meeting-form") {
+    e.preventDefault();
+    const form = e.target;
+    const errBox = document.getElementById("sm-error");
+    errBox.style.display = "none";
+    const { campaignId, stageKey } = form.dataset;
+    const participantIds = Array.from(form.querySelectorAll('input[name=participant_ids]:checked')).map(cb => parseInt(cb.value, 10));
+    const payload = {
+      start: document.getElementById("sm-start").value,
+      end: document.getElementById("sm-end").value,
+      participant_ids: participantIds,
+    };
+    try {
+      await tgnFetch(`/api/campaigns/${campaignId}/pipeline/${stageKey}/schedule`, { method: "POST", body: JSON.stringify(payload) });
+      window.location.reload();
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.style.display = "block";
+    }
+  }
+
+  if (e.target.id === "video-delivery-form") {
+    e.preventDefault();
+    const form = e.target;
+    const errBox = document.getElementById("vd-error");
+    errBox.style.display = "none";
+    const stageId = form.dataset.stageId;
+    const payload = {
+      recipient_user_id: document.getElementById("vd-recipient").value,
+      deadline: document.getElementById("vd-deadline").value,
+      note: document.getElementById("vd-note").value,
+    };
+    try {
+      await tgnFetch(`/api/pipeline-stages/${stageId}/confirm-with-delivery`, { method: "POST", body: JSON.stringify(payload) });
+      window.location.reload();
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.style.display = "block";
+    }
+  }
+
+  if (e.target.id === "assign-notify-form") {
+    e.preventDefault();
+    const form = e.target;
+    const errBox = document.getElementById("an-error");
+    errBox.style.display = "none";
+    const stageId = form.dataset.stageId;
+    const payload = {
+      recipient_user_id: document.getElementById("an-recipient").value,
+      deadline: document.getElementById("an-deadline").value,
+      note: document.getElementById("an-note").value,
+    };
+    try {
+      await tgnFetch(`/api/pipeline-stages/${stageId}/assign`, { method: "POST", body: JSON.stringify(payload) });
+      window.location.reload();
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.style.display = "block";
+    }
+  }
+
+  if (e.target.id === "submission-form") {
+    e.preventDefault();
+    const form = e.target;
+    const errBox = document.getElementById("sub-error");
+    errBox.style.display = "none";
+    const { stageId, stageKey } = form.dataset;
+    const notes = document.getElementById("sub-notes").value;
+    let payload;
+    if (stageKey === "compilation") {
+      payload = { link: document.getElementById("sub-link").value, notes };
+    } else {
+      const clips = Array.from(form.querySelectorAll(".js-sub-clip"))
+        .map(el => ({ label: el.dataset.label, url: el.value.trim() }))
+        .filter(c => c.url);
+      payload = { clips, notes };
+    }
+    try {
+      await tgnFetch(`/api/pipeline-stages/${stageId}/submit`, { method: "POST", body: JSON.stringify(payload) });
+      window.location.reload();
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.style.display = "block";
+    }
+  }
+
+  if (e.target.id === "highlights-capture-form") {
+    e.preventDefault();
+    const form = e.target;
+    const errBox = document.getElementById("hc-error");
+    errBox.style.display = "none";
+    const stageId = form.dataset.stageId;
+    const candidates = Array.from(form.querySelectorAll(".hc-row")).map(row => ({
+      label: row.querySelector(".hc-label").value.trim(),
+      start: row.querySelector(".hc-start").value.trim(),
+      end: row.querySelector(".hc-end").value.trim(),
+      notes: row.querySelector(".hc-notes").value.trim(),
+    })).filter(c => c.label || c.start || c.end);
+    const payload = { candidates, deadline: document.getElementById("hc-deadline").value || null };
+    try {
+      await tgnFetch(`/api/pipeline-stages/${stageId}/capture-highlights`, { method: "POST", body: JSON.stringify(payload) });
+      window.location.reload();
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.style.display = "block";
+    }
   }
 });
 
