@@ -21,6 +21,23 @@ def home():
     return render_template("admin/home.html", counts=counts)
 
 
+# ---------------------------------------------------------------------- data sync
+# Runs the same reference-data/task-template/pipeline migration steps as
+# `python scripts/seed.py` (see scripts/seed.py's seed_data()), but from
+# inside a normal web request instead of a Shell command — Render's free
+# plan doesn't offer Shell or one-off-job access, so this is how a deploy's
+# new content types / task templates / pipeline stages get picked up
+# without needing either. Safe to click more than once: every step in
+# seed_data() checks for existing rows before changing anything.
+@bp.route("/run-data-sync", methods=["POST"])
+@admin_required
+def run_data_sync():
+    from scripts import seed as seed_module
+    seed_module.seed_data()
+    flash("Data sync complete — content types, task templates, and the production pipeline are up to date.", "success")
+    return redirect(url_for("admin.home"))
+
+
 # ---------------------------------------------------------------------- content types
 @bp.route("/content-types")
 @admin_required
