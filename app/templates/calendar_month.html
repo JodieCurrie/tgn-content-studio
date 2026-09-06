@@ -30,7 +30,7 @@
     {{ cal.render_week_segment(segment, by_day, today) }}
   {% endfor %}
 </div>
-<div id="calendar-sentinel" data-next-from="{{ next_from }}"></div>
+<div id="calendar-sentinel" data-next-from="{{ next_from }}" data-cont-year="{{ cont_year }}" data-cont-month="{{ cont_month }}"></div>
 <div id="calendar-loading" class="page-subtitle" style="text-align:center; padding:14px; display:none;">Loading more…</div>
 {% endblock %}
 
