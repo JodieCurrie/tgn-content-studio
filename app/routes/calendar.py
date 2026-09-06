@@ -18,8 +18,19 @@ WEEKS_PER_FRAGMENT = 4  # weeks fetched per infinite-scroll batch
 # Jodie's Excel calendar), keyed by calendar month so the same month always
 # gets the same color every year (Jan/Apr/Jul/Oct share one, Feb/May/Aug/Nov
 # another, Mar/Jun/Sep/Dec the third). The month-name rail stays neutral —
-# only the day blocks (the 1st through the last day of that month) are tinted.
-MONTH_TINT_COLORS = ["#c7deee", "#eec7d4", "#c7eece"]  # blue, pink, green
+# only the day blocks (the 1st through the last day of that month) are
+# tinted. Soft, low-saturation washes (not the earlier, punchier version) so
+# adjacent months read as a gentle variation rather than a bold color swap.
+MONTH_TINT_COLORS = ["#f6f2ed", "#edf2f6", "#edf6ef"]  # soft peach, soft blue, soft sage
+
+
+@bp.app_template_global()
+def month_tint_color(month):
+    """Every day cell is tinted by its own real calendar month (not by
+    whichever month the week's rail label happens to be grouped under), so
+    the color always fills a complete month edge-to-edge with no blank or
+    mismatched days at a week that spans two months."""
+    return MONTH_TINT_COLORS[(month - 1) % 3]
 
 
 def _sunday_on_or_before(d):
@@ -71,13 +82,12 @@ def _segment_weeks(weeks, continues_year=None, continues_month=None):
         if segments and (segments[-1]["year"], segments[-1]["month"]) == (year, month):
             segments[-1]["weeks"].append(week)
         else:
-            tint_color = MONTH_TINT_COLORS[(month - 1) % 3]
             continuation = (
                 not segments and year == continues_year and month == continues_month
             )
             segments.append({
                 "year": year, "month": month, "month_name": pycal.month_name[month], "weeks": [week],
-                "tint_color": tint_color, "continuation": continuation,
+                "continuation": continuation,
             })
     return segments
 
