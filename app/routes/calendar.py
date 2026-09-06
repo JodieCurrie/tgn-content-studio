@@ -21,10 +21,10 @@ WEEKS_PER_FRAGMENT = 4  # weeks fetched per infinite-scroll batch
 # only the day blocks (the 1st through the last day of that month) are
 # tinted. Soft, low-saturation washes (not the earlier, punchier version) so
 # adjacent months read as a gentle variation rather than a bold color swap.
-# Sampled directly from the exact swatches Jodie sent: peach, blue, mint
-# green, lavender — a 4-color rotation, so it no longer repeats on a fixed
-# 3-month cadence (Jan/May/Sep share one color, Feb/Jun/Oct the next, etc.)
-MONTH_TINT_COLORS = ["#fff3ed", "#f5fbff", "#f5fcf2", "#f9f3fe"]  # peach, blue, mint, lavender
+# Sampled directly from the exact swatches Jodie sent: peach/orange, mint
+# green, blue, lavender — a 4-color rotation (same colors as before, just
+# reordered), so it repeats every 4 years rather than a fixed 3-month cadence.
+MONTH_TINT_COLORS = ["#fff3ed", "#f5fcf2", "#f5fbff", "#f9f3fe"]  # orange, green, blue, purple
 
 
 @bp.app_template_global()
