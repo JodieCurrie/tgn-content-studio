@@ -1,4 +1,5 @@
 import secrets
+import traceback
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, g, session
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -33,7 +34,17 @@ def home():
 @admin_required
 def run_data_sync():
     from scripts import seed as seed_module
-    seed_module.seed_data()
+    try:
+        seed_module.seed_data()
+    except Exception as e:
+        # Without Shell/log access on some hosting plans, a bare 500 page
+        # leaves no way to see what actually broke — surface it here
+        # instead, and roll back so a half-applied sync can't leave the
+        # database in a partway state.
+        db.get_db().rollback()
+        print("run_data_sync failed:\n" + traceback.format_exc())
+        flash(f"Sync failed and was rolled back — nothing was changed. Error: {e}", "error")
+        return redirect(url_for("admin.home"))
     flash("Data sync complete — content types, task templates, and the production pipeline are up to date.", "success")
     return redirect(url_for("admin.home"))
 
