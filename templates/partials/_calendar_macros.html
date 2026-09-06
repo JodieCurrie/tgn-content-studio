@@ -4,11 +4,16 @@
 
 {% macro render_day(day, by_day, today, month) %}
 {% set iso = day.isoformat() %}
-<div class="calendar-day {{ 'today' if day == today }} {{ 'other-month' if day.month != month }}" data-date="{{ iso }}">
+<div class="calendar-day {{ 'today' if day == today }} {{ 'other-month' if day.month != month }}" data-date="{{ iso }}"
+     style="--month-tint: {{ month_tint_color(day.month) }};">
   <div class="day-number {{ 'is-today' if day == today }}">{{ day.day }}</div>
   {% for item in by_day.get(iso, []) %}
+  {# Opaque white base painted under the type-color wash, so the card's own
+     color always reads the same regardless of the day cell's month tint
+     behind it — the month color stays confined to the empty cell space and
+     never bleeds into (or shifts the color of) a post/event block. #}
   <div class="content-card" draggable="true" data-output-id="{{ item.output_id }}" data-campaign-id="{{ item.campaign_id }}"
-       style="background:{{ item.type_color }}55; border-left-color:{{ item.type_color }};">
+       style="background-color:#fff; background-image: linear-gradient({{ item.type_color }}55, {{ item.type_color }}55); border-left-color:{{ item.type_color }};">
     <span class="cc-type">{{ item.type_label }}</span>
     <span class="cc-title">{{ item.campaign_title }}</span>
     <span class="cc-meta">
@@ -27,7 +32,7 @@
    into columns 2-8 because the label reserves column 1 for every row it
    spans (see .month-rail in app.css). #}
 <div class="month-rail" style="grid-row: span {{ segment.weeks|length }};" data-year="{{ segment.year }}" data-month="{{ segment.month }}">
-  <span>{{ segment.month_name }} {{ segment.year }}</span>
+  {% if not segment.continuation %}<span>{{ segment.month_name }} {{ segment.year }}</span>{% endif %}
 </div>
 {% for week in segment.weeks %}
   {% for day in week %}
