@@ -21,9 +21,10 @@ WEEKS_PER_FRAGMENT = 4  # weeks fetched per infinite-scroll batch
 # only the day blocks (the 1st through the last day of that month) are
 # tinted. Soft, low-saturation washes (not the earlier, punchier version) so
 # adjacent months read as a gentle variation rather than a bold color swap.
-# Sampled directly from the exact swatches Jodie sent (peach / blue /
-# lavender), rather than another guessed palette.
-MONTH_TINT_COLORS = ["#fff3ed", "#f5fbff", "#f9f3fe"]  # peach, blue, lavender
+# Sampled directly from the exact swatches Jodie sent: peach, blue, mint
+# green, lavender — a 4-color rotation, so it no longer repeats on a fixed
+# 3-month cadence (Jan/May/Sep share one color, Feb/Jun/Oct the next, etc.)
+MONTH_TINT_COLORS = ["#fff3ed", "#f5fbff", "#f5fcf2", "#f9f3fe"]  # peach, blue, mint, lavender
 
 
 @bp.app_template_global()
@@ -32,7 +33,7 @@ def month_tint_color(month):
     whichever month the week's rail label happens to be grouped under), so
     the color always fills a complete month edge-to-edge with no blank or
     mismatched days at a week that spans two months."""
-    return MONTH_TINT_COLORS[(month - 1) % 3]
+    return MONTH_TINT_COLORS[(month - 1) % len(MONTH_TINT_COLORS)]
 
 
 def _sunday_on_or_before(d):
