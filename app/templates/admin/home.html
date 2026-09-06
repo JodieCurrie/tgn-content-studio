@@ -7,4 +7,12 @@
   <a class="card stat-card" href="{{ url_for('admin.scheduling_rules') }}"><div class="stat-num">{{ counts.rules }}</div><div class="stat-label">Active scheduling rules</div></a>
   <a class="card stat-card" href="{{ url_for('admin.users') }}"><div class="stat-num">{{ counts.users }}</div><div class="stat-label">Active users</div></a>
 </div>
+
+<div class="card" style="margin-top:24px;">
+  <h3 style="margin-top:0;">Data sync</h3>
+  <p class="page-subtitle" style="margin-top:4px;">After a code update ships, click this once to pick up any new content types, task templates, or production-pipeline changes — safe to click any time, including more than once.</p>
+  <form method="POST" action="{{ url_for('admin.run_data_sync') }}">
+    <button class="btn btn-primary" type="submit">Sync pipeline &amp; reference data</button>
+  </form>
+</div>
 {% endblock %}
