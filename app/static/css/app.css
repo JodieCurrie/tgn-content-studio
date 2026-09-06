@@ -137,7 +137,7 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 .calendar-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
 .calendar-toolbar .month-label { font-size: 18px; font-weight: 700; min-width: 170px; }
 .calendar-grid {
-  display: grid; grid-template-columns: repeat(7, 1fr);
+  display: grid; grid-template-columns: 34px repeat(7, 1fr);
   border: 1px solid var(--border); border-radius: var(--radius-lg);
   overflow: hidden; background: var(--border);
   gap: 1px;
@@ -147,6 +147,7 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
   font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted);
   text-align: center;
 }
+.calendar-rail-spacer { padding: 0; }
 .calendar-day {
   background: var(--surface); min-height: 118px; padding: 6px;
   display: flex; flex-direction: column; gap: 4px;
@@ -159,10 +160,19 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 .calendar-day.other-month:hover { background: #F2ECE2; }
 .day-number { font-size: 12px; font-weight: 700; color: var(--text-muted); padding: 2px 4px; }
 .day-number.is-today { color: var(--accent-dark); }
-.calendar-month-divider {
-  grid-column: 1 / -1; background: var(--surface-alt); padding: 10px 14px;
-  font-size: 14px; font-weight: 700; color: var(--text);
-  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+/* One rotated label per month, spanning every week-row it owns (grid-row:
+   span, set inline per segment) — a continuous flow of weeks with the
+   month named once along the side, like Jodie's original Excel calendar,
+   instead of a full-width divider row that forced a repeated boundary week. */
+.month-rail {
+  background: var(--surface-alt); display: flex; align-items: center; justify-content: center;
+  position: sticky; top: 34px; align-self: stretch;
+  border-right: 1px solid var(--border);
+}
+.month-rail span {
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  font-size: 12px; font-weight: 700; letter-spacing: 0.05em; color: var(--text);
+  white-space: nowrap;
 }
 .calendar-weekday-header.sticky-header { position: sticky; top: 0; z-index: 5; }
 
@@ -284,7 +294,7 @@ table.admin-table td { padding: 9px 10px; border-bottom: 1px solid var(--border)
   .sidebar-section-label, .sidebar-footer { display: none; }
   .sidebar-brand { padding: 6px 10px; }
   .main { padding: 16px; }
-  .calendar-grid { grid-template-columns: repeat(7, minmax(90px,1fr)); overflow-x: auto; }
+  .calendar-grid { grid-template-columns: 28px repeat(7, minmax(90px,1fr)); overflow-x: auto; }
   .week-grid { grid-template-columns: repeat(7, minmax(140px,1fr)); overflow-x: auto; }
   .two-col { grid-template-columns: 1fr; }
   .detail-panel { width: 100vw; right: -100vw; }

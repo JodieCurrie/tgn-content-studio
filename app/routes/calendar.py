@@ -11,43 +11,53 @@ from .. import analytics
 bp = Blueprint("calendar", __name__)
 
 WEEKDAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-MONTHS_PER_INITIAL_LOAD = 3  # how many months render before the user has to scroll
+INITIAL_WEEKS = 14   # how many weeks render before the user has to scroll (~3 months)
+WEEKS_PER_FRAGMENT = 4  # weeks fetched per infinite-scroll batch
 
 
-def _month_grid(year, month):
-    """Weeks (lists of 7 dates) covering the full calendar month, Sunday-first,
-    including the leading/trailing days from neighbouring months so weeks
-    stay whole — this is what makes months visually flow into each other."""
-    first = date(year, month, 1)
-    start = first - timedelta(days=(first.weekday() + 1) % 7)
-    last_day = pycal.monthrange(year, month)[1]
-    last = date(year, month, last_day)
-    end = last + timedelta(days=(5 - last.weekday()) % 7)
+def _sunday_on_or_before(d):
+    return d - timedelta(days=(d.weekday() + 1) % 7)
 
+
+def _continuous_weeks(start_sunday, count):
+    """`count` consecutive 7-day weeks starting at `start_sunday` — a flat,
+    non-overlapping sequence (no per-month padding), which is what makes the
+    weeks bleed into each other with no duplicated/repeated week at a month
+    boundary (Part 6, refined per Jodie's feedback: one continuous flow, not
+    a self-contained grid per month)."""
     weeks = []
-    cursor = start
-    while cursor <= end:
-        week = [cursor + timedelta(days=i) for i in range(7)]
-        weeks.append(week)
+    cursor = start_sunday
+    for _ in range(count):
+        weeks.append([cursor + timedelta(days=i) for i in range(7)])
         cursor += timedelta(days=7)
-    return weeks, start, end
+    return weeks
 
 
-def _add_months(year, month, delta):
-    """(year, month) shifted by delta months — no artificial bound in either
-    direction, which is what lets the calendar scroll indefinitely instead
-    of stopping after some fixed number of months."""
-    total = (year * 12 + (month - 1)) + delta
-    return total // 12, total % 12 + 1
+def _week_owner_month(week):
+    """Which (year, month) a week 'belongs to', by majority of its 7 days —
+    used only to decide where the vertical month label sits, never to drop
+    or duplicate any day."""
+    counts = {}
+    for d in week:
+        key = (d.year, d.month)
+        counts[key] = counts.get(key, 0) + 1
+    return max(counts.items(), key=lambda kv: kv[1])[0]
 
 
-def _build_month_block(year, month):
-    weeks, start, end = _month_grid(year, month)
-    by_day = _outputs_by_day(start, end)
-    return {
-        "year": year, "month": month, "month_name": pycal.month_name[month],
-        "weeks": weeks, "by_day": by_day,
-    }
+def _segment_weeks(weeks):
+    """Group consecutive weeks under whichever month owns each one, so the
+    month name can be rendered once, spanning those rows in a narrow side
+    rail (rotated text, like Jodie's original Excel calendar) — instead of a
+    full-width divider row that forced each month to re-render its own
+    boundary week and duplicate it."""
+    segments = []
+    for week in weeks:
+        year, month = _week_owner_month(week)
+        if segments and (segments[-1]["year"], segments[-1]["month"]) == (year, month):
+            segments[-1]["weeks"].append(week)
+        else:
+            segments.append({"year": year, "month": month, "month_name": pycal.month_name[month], "weeks": [week]})
+    return segments
 
 
 def _outputs_by_day(start, end):
@@ -77,20 +87,22 @@ def _outputs_by_day(start, end):
 @bp.route("/calendar")
 @login_required
 def month_view():
-    """The calendar (Part 2 of the brief): a single continuous, Sunday-first
-    grid — not a page-per-month. This renders a starting window of a few
-    months; calendar.js extends it further as the user scrolls, fetching
-    more from /calendar/month-fragment, with no fixed cap on how far ahead
-    that can go."""
+    """The calendar (Part 2 of the brief, refined per Jodie's feedback): one
+    continuous, Sunday-first flow of weeks — never a repeated/duplicated
+    week at a month boundary. Renders a starting window; calendar.js extends
+    it further as the user scrolls, fetching more from
+    /calendar/month-fragment, with no fixed cap on how far ahead that can go.
+    The month name is shown once per group of weeks in a vertical side rail,
+    like Jodie's original Excel calendar, instead of a full-width divider."""
     today = date.today()
     year = request.args.get("year", type=int) or today.year
     month = request.args.get("month", type=int) or today.month
 
-    month_blocks = [
-        _build_month_block(*_add_months(year, month, i))
-        for i in range(MONTHS_PER_INITIAL_LOAD)
-    ]
-    sentinel_year, sentinel_month = _add_months(year, month, MONTHS_PER_INITIAL_LOAD)
+    start_sunday = _sunday_on_or_before(date(year, month, 1))
+    weeks = _continuous_weeks(start_sunday, INITIAL_WEEKS)
+    segments = _segment_weeks(weeks)
+    by_day = _outputs_by_day(weeks[0][0], weeks[-1][-1])
+    next_from = weeks[-1][0] + timedelta(days=7)
 
     legend = db.rows_to_list(
         db.query("SELECT key, label, color FROM content_types WHERE archived = 0 ORDER BY sort_order")
@@ -98,9 +110,9 @@ def month_view():
 
     return render_template(
         "calendar_month.html",
-        month_blocks=month_blocks, today=today,
+        segments=segments, by_day=by_day, today=today,
         jump_year=year, jump_month=month,
-        sentinel_year=sentinel_year, sentinel_month=sentinel_month,
+        next_from=next_from.isoformat(),
         weekday_headers=WEEKDAY_HEADERS,
         legend=legend,
     )
@@ -109,17 +121,28 @@ def month_view():
 @bp.route("/calendar/month-fragment")
 @login_required
 def month_fragment():
-    """Returns one month's worth of calendar grid HTML (a divider + its
-    weeks) for calendar.js to append as the user scrolls further down."""
-    year = request.args.get("year", type=int)
-    month = request.args.get("month", type=int)
-    if not year or not month or not (1 <= month <= 12):
+    """Returns the next batch of weeks (grouped into month segments) for
+    calendar.js to append as the user scrolls further down. `from` must be
+    an ISO date that falls on a Sunday — calendar.js always hands back
+    exactly the date this view last reported as `next_from`, so the flow of
+    weeks never skips or repeats one."""
+    from_str = request.args.get("from")
+    if not from_str:
         return "", 400
-    block = _build_month_block(year, month)
+    try:
+        start_sunday = date.fromisoformat(from_str)
+    except ValueError:
+        return "", 400
+    if start_sunday.weekday() != 6:  # Python Sunday = 6
+        return "", 400
+
+    weeks = _continuous_weeks(start_sunday, WEEKS_PER_FRAGMENT)
+    segments = _segment_weeks(weeks)
+    by_day = _outputs_by_day(weeks[0][0], weeks[-1][-1])
+
     return render_template(
         "partials/calendar_month_fragment.html",
-        weeks=block["weeks"], by_day=block["by_day"], today=date.today(),
-        month=block["month"], year=block["year"], month_name=block["month_name"],
+        segments=segments, by_day=by_day, today=date.today(),
     )
 
 

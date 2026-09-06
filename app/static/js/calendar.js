@@ -125,42 +125,47 @@ calJumpInput && calJumpInput.addEventListener("change", () => {
   window.location.href = `${window.location.pathname}?year=${y}&month=${parseInt(m, 10)}`;
 });
 
-/* Continuous/infinite-scroll calendar: months bleed into each other in one
-   grid (Part 2) rather than a "click Next Month" page-per-month, and there
-   is no fixed cap on how far ahead this can go — it just keeps fetching
-   /calendar/month-fragment as the sentinel comes into view. */
+/* Continuous/infinite-scroll calendar: weeks bleed into each other in one
+   flat, never-repeating flow (Part 2/6) rather than a "click Next Month"
+   page-per-month or a per-month self-contained block — the server hands
+   back a plain "next Sunday to fetch from" date, and each fetch picks up
+   exactly where the last batch of weeks left off, so no week is ever
+   fetched or rendered twice. No fixed cap on how far ahead this can go. */
 const calendarGrid = document.getElementById("calendar-grid");
 const calendarSentinel = document.getElementById("calendar-sentinel");
 const calendarLoading = document.getElementById("calendar-loading");
-let loadingMoreMonths = false;
+let loadingMoreWeeks = false;
 
-async function loadNextCalendarMonth() {
-  if (!calendarSentinel || loadingMoreMonths) return;
-  loadingMoreMonths = true;
+function addDaysToIsoDate(iso, days) {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+async function loadNextCalendarWeeks() {
+  if (!calendarSentinel || loadingMoreWeeks) return;
+  loadingMoreWeeks = true;
   if (calendarLoading) calendarLoading.style.display = "block";
-  const year = calendarSentinel.dataset.nextYear;
-  const month = calendarSentinel.dataset.nextMonth;
+  const from = calendarSentinel.dataset.nextFrom;
   try {
-    const res = await fetch(`/calendar/month-fragment?year=${year}&month=${month}`);
+    const res = await fetch(`/calendar/month-fragment?from=${from}`);
     if (res.ok) {
       const html = await res.text();
       const wrapper = document.createElement("div");
       wrapper.innerHTML = html;
       Array.from(wrapper.children).forEach(node => calendarGrid.appendChild(node));
-      const nextMonthNum = parseInt(month, 10) === 12 ? 1 : parseInt(month, 10) + 1;
-      const nextYearNum = parseInt(month, 10) === 12 ? parseInt(year, 10) + 1 : parseInt(year, 10);
-      calendarSentinel.dataset.nextYear = nextYearNum;
-      calendarSentinel.dataset.nextMonth = nextMonthNum;
+      // matches WEEKS_PER_FRAGMENT in app/routes/calendar.py
+      calendarSentinel.dataset.nextFrom = addDaysToIsoDate(from, 4 * 7);
     }
   } finally {
-    loadingMoreMonths = false;
+    loadingMoreWeeks = false;
     if (calendarLoading) calendarLoading.style.display = "none";
   }
 }
 
 if (calendarSentinel && "IntersectionObserver" in window) {
   const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => { if (entry.isIntersecting) loadNextCalendarMonth(); });
+    entries.forEach(entry => { if (entry.isIntersecting) loadNextCalendarWeeks(); });
   }, { rootMargin: "600px 0px 600px 0px" });
   observer.observe(calendarSentinel);
 }

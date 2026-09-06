@@ -22,14 +22,15 @@
 </div>
 
 <div class="calendar-grid" id="calendar-grid">
+  <div class="calendar-weekday-header sticky-header calendar-rail-spacer"></div>
   {% for wd in weekday_headers %}
     <div class="calendar-weekday-header sticky-header">{{ wd }}</div>
   {% endfor %}
-  {% for mb in month_blocks %}
-    {{ cal.render_month_block(mb.weeks, mb.by_day, today, mb.month, mb.year, mb.month_name) }}
+  {% for segment in segments %}
+    {{ cal.render_week_segment(segment, by_day, today) }}
   {% endfor %}
 </div>
-<div id="calendar-sentinel" data-next-year="{{ sentinel_year }}" data-next-month="{{ sentinel_month }}"></div>
+<div id="calendar-sentinel" data-next-from="{{ next_from }}"></div>
 <div id="calendar-loading" class="page-subtitle" style="text-align:center; padding:14px; display:none;">Loading more…</div>
 {% endblock %}
 

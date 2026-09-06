@@ -20,11 +20,18 @@
 </div>
 {% endmacro %}
 
-{% macro render_month_block(weeks, by_day, today, month, year, month_name) %}
-<div class="calendar-month-divider" data-year="{{ year }}" data-month="{{ month }}">{{ month_name }} {{ year }}</div>
-{% for week in weeks %}
+{% macro render_week_segment(segment, by_day, today) %}
+{# One vertical, rotated month label spanning every week-row that belongs
+   to it, followed immediately by those weeks' day cells — no divider row,
+   no week ever rendered twice. Grid auto-placement flows the day cells
+   into columns 2-8 because the label reserves column 1 for every row it
+   spans (see .month-rail in app.css). #}
+<div class="month-rail" style="grid-row: span {{ segment.weeks|length }};" data-year="{{ segment.year }}" data-month="{{ segment.month }}">
+  <span>{{ segment.month_name }} {{ segment.year }}</span>
+</div>
+{% for week in segment.weeks %}
   {% for day in week %}
-    {{ render_day(day, by_day, today, month) }}
+    {{ render_day(day, by_day, today, segment.month) }}
   {% endfor %}
 {% endfor %}
 {% endmacro %}
