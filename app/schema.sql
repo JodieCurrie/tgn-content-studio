@@ -133,7 +133,18 @@ CREATE TABLE IF NOT EXISTS campaigns (
     source_idea_id          INTEGER REFERENCES content_ideas(id) ON DELETE SET NULL,
     created_by              INTEGER REFERENCES users(id),
     created_at              TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
+
+    -- Targeted Video production pipeline v2 (Part 14-18+): Script
+    -- Development / Concept Hashout / Film-Record are shared once per
+    -- shoot (per campaign) rather than duplicated across the Short and
+    -- YouTube outputs — see app/pipeline.py SHOOT_STAGE_KEYS. One Drive
+    -- folder per shoot (covers both outputs' files); script_youtube is
+    -- the second, YouTube-specific script Script Development captures
+    -- alongside the existing `script` field.
+    drive_folder_id         TEXT,
+    drive_folder_link       TEXT,
+    script_youtube          TEXT NOT NULL DEFAULT ''
 );
 
 -- ---------------------------------------------------------------------------
@@ -148,6 +159,12 @@ CREATE TABLE IF NOT EXISTS content_outputs (
     status               TEXT NOT NULL DEFAULT 'idea',
     assigned_user_id     INTEGER REFERENCES users(id),
     sort_order           INTEGER NOT NULL DEFAULT 0,
+    -- One Drive folder per video (Targeted Video production pipeline, Part
+    -- 14-18) — created automatically once the pipeline reaches Concept
+    -- Hashout; every stage's files live in this one folder. NULL for output
+    -- types that don't use the pipeline.
+    drive_folder_id      TEXT,
+    drive_folder_link    TEXT,
     created_at           TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -166,7 +183,11 @@ CREATE TABLE IF NOT EXISTS task_templates (
     role_key            TEXT NOT NULL,             -- which role this task is typically for
     task_name           TEXT NOT NULL,
     offset_days_before  INTEGER NOT NULL DEFAULT 3,-- due date = publish_date - offset
-    sort_order          INTEGER NOT NULL DEFAULT 0
+    sort_order          INTEGER NOT NULL DEFAULT 0,
+    -- Which of the 7 Targeted Video pipeline stages this task belongs to
+    -- (see app/pipeline.py PIPELINE_STAGES) — NULL for every other content
+    -- type, which just keeps the plain flat task list they've always had.
+    stage_key           TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -181,8 +202,83 @@ CREATE TABLE IF NOT EXISTS tasks (
     priority        TEXT NOT NULL DEFAULT 'normal',
     notes           TEXT NOT NULL DEFAULT '',
     created_from_template INTEGER NOT NULL DEFAULT 0,
+    stage_key       TEXT,       -- copied from the template that created it; see pipeline.py
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ---------------------------------------------------------------------------
+-- Targeted Video production pipeline v2 (Part 14-18+): two tiers of stages.
+--
+--   Shoot-level  (script -> concept -> film): ONE set per campaign, shared
+--   by both the Short and YouTube/Long outputs, since they come from the
+--   same shoot. These rows have campaign_id set and output_id NULL.
+--
+--   Production-level (edit -> review_edit -> [audio -> review_audio ->
+--   compilation] for Short / [highlights] for Long): one set PER OUTPUT,
+--   since editing/review/audio/highlights genuinely differ between the two
+--   deliverables. These rows have output_id set and campaign_id NULL.
+--
+-- A stage's actual status is still derived from its tasks' statuses (see
+-- pipeline.py) — shared shoot-stage tasks are tagged with campaign_id and
+-- stage_key but output_id NULL; production-stage tasks keep the existing
+-- output_id + stage_key tagging. This table only holds what tasks can't:
+-- one-time Calendar/Meet/Drive side effects, meeting scheduling, hand-off
+-- (recipient/deadline) capture, review decisions, and submission links —
+-- kept here so each only ever fires/records once.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS pipeline_stages (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id         INTEGER REFERENCES campaigns(id) ON DELETE CASCADE,
+    output_id           INTEGER REFERENCES content_outputs(id) ON DELETE CASCADE,
+    stage_key           TEXT NOT NULL,
+    sort_order          INTEGER NOT NULL,
+    calendar_event_id   TEXT,       -- Concept Hashout + Film/Record only
+    calendar_link       TEXT,
+    meet_link           TEXT,       -- Concept Hashout only
+    activated_at        TEXT,       -- when this stage's side effects fired (unlocked)
+
+    -- Real meeting scheduling (Concept Hashout / Film-Record only): a stage
+    -- isn't auto-scheduled at a fixed time anymore — a human picks a real
+    -- date/time/participant list, which can be revised (reschedule keeps the
+    -- same row + the same Calendar event, just updates these).
+    meeting_start           TEXT,       -- ISO datetime
+    meeting_end             TEXT,       -- ISO datetime
+    participant_user_ids    TEXT,       -- JSON array of user ids
+    meeting_confirmed_at    TEXT,       -- set once an admin confirms "yes, it happened"
+
+    -- Hand-off / delivery capture — generic across Film/Record (hands the
+    -- shoot off to the editor) and Audio Creation (hands the approved edit
+    -- off to the musician): a real user account now, not free-text.
+    delivery_recipient_user_id INTEGER REFERENCES users(id),
+    delivery_link               TEXT,       -- optional extra link/note
+    delivery_deadline           TEXT,       -- ISO date
+    delivery_email_sent_at      TEXT,
+
+    -- Review decisions (review_edit / review_audio only): approve/reject
+    -- gate. A reject reopens the stage it reviews (see pipeline.py
+    -- REOPENS_STAGE) rather than advancing.
+    review_decision      TEXT,       -- 'approved' | 'rejected'
+    review_notes         TEXT,
+    reviewed_at          TEXT,
+
+    -- Submission capture (compilation / highlights only): the assignee
+    -- pastes a Drive link when their work is ready; an admin then clicks
+    -- "Mark as received" to actually finish the stage, since the app can't
+    -- detect a real file download. `submission_link` holds a single URL for
+    -- compilation, or a JSON list of {label, url} for highlights.
+    submission_link       TEXT,
+    submission_notes      TEXT,
+    submitted_at          TEXT,
+
+    -- Highlights only: Jodie's captured candidate timestamp ranges, JSON
+    -- list of {label, start, end, notes}.
+    highlight_candidates  TEXT,
+
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK ((campaign_id IS NOT NULL AND output_id IS NULL) OR (campaign_id IS NULL AND output_id IS NOT NULL)),
+    UNIQUE (campaign_id, stage_key),
+    UNIQUE (output_id, stage_key)
 );
 
 -- ---------------------------------------------------------------------------

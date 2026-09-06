@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from . import db
 from . import task_engine
 from . import scheduling
+from . import pipeline
 
 
 def get_content_type(content_type_id):
@@ -220,6 +221,10 @@ def get_campaign_detail(campaign_id):
             )
         )
         o["platforms"] = plats
+        # Targeted Video — Short/YouTube: the 7-stage production pipeline,
+        # each stage with its own tasks (rendered separately from the
+        # campaign's plain task list below). [] for every other type.
+        o["pipeline_stages"] = pipeline.get_stages_with_status(o["id"])
 
     tasks = db.rows_to_list(
         db.query(
@@ -249,6 +254,11 @@ def get_campaign_detail(campaign_id):
             (campaign_id,),
         )
     )
+    # Shared shoot-level tracker (Script/Concept/Film) — one per campaign,
+    # rendered once above the per-output pipeline trackers. [] for a
+    # campaign with no Targeted Video outputs.
+    campaign["shoot_stages"] = pipeline.get_shoot_stages_with_status(campaign_id)
+
     dependents = db.rows_to_list(
         db.query(
             "SELECT id, title, publish_date, status FROM campaigns WHERE depends_on_campaign_id = ? ORDER BY publish_date",
@@ -262,7 +272,10 @@ def get_campaign_detail(campaign_id):
         )
 
     campaign["outputs"] = outputs
-    campaign["tasks"] = tasks
+    # Pipeline-stage tasks are rendered under their own output's stage
+    # tracker instead (see o["pipeline_stages"] above) — keep this flat
+    # list to the tasks that aren't part of a pipeline.
+    campaign["tasks"] = [t for t in tasks if not t.get("stage_key")]
     campaign["inspiration"] = inspiration
     campaign["assets"] = assets
     campaign["comments"] = comments
@@ -273,7 +286,7 @@ def get_campaign_detail(campaign_id):
 
 
 CAMPAIGN_TEXT_FIELDS = {
-    "title", "concept", "script", "bible_references", "caption", "notes",
+    "title", "concept", "script", "script_youtube", "bible_references", "caption", "notes",
     "notes_to_videographer", "notes_to_musician", "status", "owner_id",
 }
 

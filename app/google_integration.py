@@ -196,8 +196,11 @@ def get_valid_access_token():
 # etc.) to create real invites with Meet links. Wired up as those workflow
 # stages are built; kept here as the shared low-level call.
 # ---------------------------------------------------------------------------
-def create_calendar_event(summary, description, start_dt, end_dt, attendee_emails, create_meet_link=True):
+def create_calendar_event(summary, description, start_dt, end_dt, attendee_emails, create_meet_link=True, color_id=None):
     """start_dt/end_dt: timezone-aware datetime objects.
+    color_id: optional Google Calendar colorId string ("8" = Graphite/grey,
+    used for the production-pipeline meetings so they read as distinct,
+    neutral "custom" blocks rather than a content-colored event).
     Returns the created event dict (includes 'htmlLink' and, if requested,
     a Meet link under conferenceData)."""
     access_token = get_valid_access_token()
@@ -209,6 +212,8 @@ def create_calendar_event(summary, description, start_dt, end_dt, attendee_email
         "attendees": [{"email": e} for e in attendee_emails],
         "guestsCanModify": False,
     }
+    if color_id:
+        body["colorId"] = color_id
     if create_meet_link:
         body["conferenceData"] = {
             "createRequest": {
@@ -227,6 +232,34 @@ def create_calendar_event(summary, description, start_dt, end_dt, attendee_email
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"Google Calendar event creation failed ({e.code}): {e.read().decode('utf-8', errors='replace')}") from e
+
+
+def update_calendar_event(event_id, summary=None, description=None, start_dt=None, end_dt=None, attendee_emails=None):
+    """PATCHes an existing event in place (used to reschedule a pipeline
+    meeting without leaving a stale duplicate on the calendar). Only the
+    fields passed are changed. start_dt/end_dt: timezone-aware datetimes."""
+    access_token = get_valid_access_token()
+    body = {}
+    if summary is not None:
+        body["summary"] = summary
+    if description is not None:
+        body["description"] = description
+    if start_dt is not None:
+        body["start"] = {"dateTime": start_dt.isoformat()}
+    if end_dt is not None:
+        body["end"] = {"dateTime": end_dt.isoformat()}
+    if attendee_emails is not None:
+        body["attendees"] = [{"email": e} for e in attendee_emails]
+
+    url = f"{CALENDAR_API}/calendars/primary/events/{event_id}?sendUpdates=all"
+    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), method="PATCH")
+    req.add_header("Authorization", f"Bearer {access_token}")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Google Calendar event update failed ({e.code}): {e.read().decode('utf-8', errors='replace')}") from e
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +295,33 @@ def upload_file_to_drive(local_path, filename, mime_type, folder_id=None, share_
             result = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"Google Drive upload failed ({e.code}): {e.read().decode('utf-8', errors='replace')}") from e
+
+    if share_with_emails:
+        for email in share_with_emails:
+            _share_drive_file(result["id"], email, access_token)
+    return result
+
+
+def create_drive_folder(name, parent_id=None, share_with_emails=None):
+    """Creates a Drive folder (mimeType application/vnd.google-apps.folder).
+    Used once per Targeted Video, when its pipeline reaches Concept Hashout
+    (see app/pipeline.py) — every later stage's files (script doc, raw
+    footage link, edit drafts, audio, final compilation) land in this one
+    folder. Returns the created folder dict (includes 'id' and 'webViewLink')."""
+    access_token = get_valid_access_token()
+    metadata = {"name": name, "mimeType": "application/vnd.google-apps.folder"}
+    if parent_id:
+        metadata["parents"] = [parent_id]
+
+    url = f"{DRIVE_API}/files?fields=id,webViewLink"
+    req = urllib.request.Request(url, data=json.dumps(metadata).encode("utf-8"), method="POST")
+    req.add_header("Authorization", f"Bearer {access_token}")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Google Drive folder creation failed ({e.code}): {e.read().decode('utf-8', errors='replace')}") from e
 
     if share_with_emails:
         for email in share_with_emails:

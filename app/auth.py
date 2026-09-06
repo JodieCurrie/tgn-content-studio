@@ -3,6 +3,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, sessio
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import db
+from . import pipeline
 
 bp = Blueprint("auth", __name__)
 
@@ -12,6 +13,7 @@ def load_logged_in_user():
     user_id = session.get("user_id")
     if user_id is None:
         g.user = None
+        g.pending_pipeline_confirmations = []
     else:
         g.user = db.row_to_dict(
             db.query_one(
@@ -25,6 +27,14 @@ def load_logged_in_user():
                 (user_id,),
             )
         )
+        # "Did this meeting happen, or does it need rescheduling?" prompts
+        # only for admins (Part 14-18 pipeline redesign) — checked on every
+        # request rather than via a background job, since this app has no
+        # scheduler/worker process; the query is cheap and the table tiny.
+        if g.user and g.user["role_is_admin"]:
+            g.pending_pipeline_confirmations = pipeline.pending_confirmations_for_admin()
+        else:
+            g.pending_pipeline_confirmations = []
 
 
 def login_required(view):
