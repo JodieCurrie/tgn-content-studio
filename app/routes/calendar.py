@@ -21,7 +21,15 @@ WEEKS_PER_FRAGMENT = 4  # weeks fetched per infinite-scroll batch
 # only the day blocks (the 1st through the last day of that month) are
 # tinted. Soft, low-saturation washes (not the earlier, punchier version) so
 # adjacent months read as a gentle variation rather than a bold color swap.
-MONTH_TINT_COLORS = ["#fbe7d6", "#dceaf6", "#e0f0de"]  # peach, soft blue, soft sage
+# True-hue colors at low opacity (not just very light solid colors) — a
+# transparent wash keeps its hue readable at low intensity, where a fully
+# opaque near-white color tends to read as plain grey (Jodie's earlier
+# feedback on the last, too-desaturated attempt).
+MONTH_TINT_COLORS = [
+    "rgba(237, 153, 94, 0.16)",   # peach
+    "rgba(65, 152, 214, 0.14)",   # soft blue
+    "rgba(51, 177, 72, 0.14)",    # soft sage
+]
 
 
 @bp.app_template_global()
