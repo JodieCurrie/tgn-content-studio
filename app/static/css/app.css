@@ -153,12 +153,14 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
   display: flex; flex-direction: column; gap: 4px;
 }
 .calendar-day.today { box-shadow: inset 0 0 0 2px var(--accent-soft); }
-.calendar-day.other-month { background: #FAF8F5; }
+/* other-month no longer forces its own flat background — every day (edge
+   days spilling into a neighboring week's rail included) is colored purely
+   by its own real month via --month-tint; only the day number stays dimmed
+   to mark it as a week that a different month's label owns. */
 .calendar-day.other-month .day-number { color: #C9C0B2; }
 .calendar-day.drag-over { background: var(--accent-soft) !important; }
 /* filter (not background) so hover reads on top of every month's tint */
 .calendar-day:hover { filter: brightness(0.97); cursor: pointer; }
-.calendar-day.other-month:hover { background: #F2ECE2; filter: none; }
 .day-number { font-size: 12px; font-weight: 700; color: var(--text-muted); padding: 2px 4px; }
 .day-number.is-today { color: var(--accent-dark); }
 /* One rotated label per month, spanning every week-row it owns (grid-row:
