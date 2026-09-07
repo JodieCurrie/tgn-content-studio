@@ -179,6 +179,7 @@ def update_task(task_id):
     if "status" in fields and fields["status"] != "not_started" and not pipeline.can_advance_task(task):
         return jsonify({"error": "This task's stage hasn't unlocked yet — the previous stage isn't complete."}), 409
 
+    previous_assigned_user_id = task["assigned_user_id"]
     if fields:
         set_clause = ", ".join(f"{k} = ?" for k in fields)
         db.execute(
@@ -187,6 +188,12 @@ def update_task(task_id):
         )
     if "status" in fields:
         pipeline.after_task_status_change(task_id)
+    # Part 23: reassigning an opt-in type's single flat "Create X" task away
+    # from whoever held it is what starts its staged production pipeline —
+    # replaces the old explicit "Start production workflow" button, for both
+    # Monthly and Filler.
+    if "assigned_user_id" in fields:
+        pipeline.after_task_reassignment(task_id, previous_assigned_user_id)
     return jsonify({"ok": True})
 
 
@@ -205,8 +212,9 @@ def schedule_pipeline_meeting(campaign_id, stage_key):
     if not start or not end:
         return jsonify({"error": "Please choose a start and end time."}), 400
     participant_ids = [int(i) for i in (data.get("participant_ids") or [])]
+    bunch_with_stage_ids = [int(i) for i in (data.get("bunch_with_stage_ids") or [])]
     try:
-        pipeline.schedule_meeting(campaign_id, stage_key, start, end, participant_ids)
+        pipeline.schedule_meeting(campaign_id, stage_key, start, end, participant_ids, bunch_with_stage_ids)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify({"ok": True})
@@ -371,20 +379,28 @@ def mark_pipeline_stage_received(stage_id):
     return jsonify({"ok": True})
 
 
-@bp.route("/outputs/<int:output_id>/start-pipeline", methods=["POST"])
+@bp.route("/pipeline-stages/<int:stage_id>/decide-audio", methods=["POST"])
 @login_required
-def start_output_pipeline(output_id):
-    """Part 21's opt-in trigger: switches ONE Monthly Campaign output from
-    its plain flat checklist over to the staged Develop Concept -> Film/
-    Record -> Edit -> Review Edit -> [Select Highlight Reels] pipeline."""
+def decide_pipeline_audio(stage_id):
+    """Filler-video's dynamic branch (Part 23): after Review Content
+    approves, yes/no on sending it to a musician."""
     forbidden = _admin_only()
     if forbidden:
         return forbidden
+    data = request.get_json(force=True) or {}
     try:
-        pipeline.start_output_pipeline(output_id, actor_id=g.user["id"])
+        pipeline.decide_filler_audio(stage_id, bool(data.get("wants_audio")))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify({"ok": True})
+
+
+@bp.route("/outputs/<int:output_id>/filler-film-candidates")
+@login_required
+def filler_film_candidates(output_id):
+    """Other Filler-video shoots not yet scheduled — offered as "bunch with
+    this one too" options (Part 23, Filler-only)."""
+    return jsonify({"candidates": pipeline.unscheduled_filler_film_candidates(exclude_output_id=output_id)})
 
 
 @bp.route("/pipeline-stages/<int:stage_id>/capture-highlights", methods=["POST"])

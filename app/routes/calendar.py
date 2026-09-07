@@ -216,6 +216,9 @@ def month_fragment():
     )
 
 
+WEEK_VIEW_SPAN_DAYS = 14  # Part 23: a 2-week snippet, not just the current week
+
+
 @bp.route("/calendar/week")
 @login_required
 def week_view():
@@ -223,8 +226,8 @@ def week_view():
     anchor_str = request.args.get("date")
     anchor = date.fromisoformat(anchor_str) if anchor_str else today
     start = anchor - timedelta(days=(anchor.weekday() + 1) % 7)  # Sunday-first, matches the month calendar
-    end = start + timedelta(days=6)
-    days = [start + timedelta(days=i) for i in range(7)]
+    end = start + timedelta(days=WEEK_VIEW_SPAN_DAYS - 1)
+    days = [start + timedelta(days=i) for i in range(WEEK_VIEW_SPAN_DAYS)]
     by_day = _outputs_by_day(start, end)
     meetings_by_day = _meetings_by_day(start, end)
     # A flat "Meetings this week" list (same data as meetings_by_day,
@@ -243,18 +246,24 @@ def week_view():
             )
         )
 
+    # Part 23: "Tasks due" is now scoped to whoever's actually looking at
+    # it — their own tasks in this 2-week window, not every task ever due
+    # (which is what a "my tasks" list used to mean here) and not everyone
+    # else's. Meetings above stay unscoped, since a shared shoot involves
+    # more than one person by nature.
     tasks_this_week = db.rows_to_list(
         db.query(
             """SELECT t.*, c.title AS campaign_title, u.name AS assigned_name
                FROM tasks t JOIN campaigns c ON c.id = t.campaign_id
                LEFT JOIN users u ON u.id = t.assigned_user_id
-               WHERE t.due_date BETWEEN ? AND ? ORDER BY t.due_date""",
-            (start.isoformat(), end.isoformat()),
+               WHERE t.due_date BETWEEN ? AND ? AND t.assigned_user_id = ?
+               ORDER BY t.due_date""",
+            (start.isoformat(), end.isoformat(), g.user["id"]),
         )
     )
 
-    prev_week = (start - timedelta(days=7)).isoformat()
-    next_week = (start + timedelta(days=7)).isoformat()
+    prev_week = (start - timedelta(days=WEEK_VIEW_SPAN_DAYS)).isoformat()
+    next_week = (start + timedelta(days=WEEK_VIEW_SPAN_DAYS)).isoformat()
 
     return render_template(
         "calendar_week.html", days=days, by_day=by_day, meetings_by_day=meetings_by_day,
@@ -381,11 +390,19 @@ def pipeline_schedule_modal(campaign_id, stage_key):
         return "<div class='panel-empty'>Not found.</div>", 404
     users = db.rows_to_list(db.query("SELECT id, name FROM users WHERE active = 1 ORDER BY name"))
     participant_ids = db.from_json(stage.get("participant_user_ids"), [])
+    # Bunching multiple filming sessions into one meeting (Part 23, Filler
+    # video only): offer any of THIS output's Filler-video siblings whose
+    # own Film/Record hasn't been scheduled yet.
+    bunch_candidates = []
+    if stage_key == "film" and stage.get("output_id"):
+        output = db.row_to_dict(db.query_one("SELECT content_type_id FROM content_outputs WHERE id = ?", (stage["output_id"],)))
+        if output and pipeline.is_filler_video_pipeline_eligible(output["content_type_id"]):
+            bunch_candidates = pipeline.unscheduled_filler_film_candidates(exclude_output_id=stage["output_id"])
     return render_template(
         "partials/schedule_meeting_modal.html",
         campaign=campaign, stage=stage, stage_key=stage_key,
         stage_label=pipeline.STAGE_BY_KEY[stage_key]["label"],
-        users=users, participant_ids=participant_ids,
+        users=users, participant_ids=participant_ids, bunch_candidates=bunch_candidates,
     )
 
 
@@ -463,7 +480,7 @@ def pipeline_assign_modal(stage_id):
             (stage_id,),
         )
     )
-    if not stage or stage["stage_key"] != "audio":
+    if not stage or stage["stage_key"] not in ("audio", "design_post"):
         return "<div class='panel-empty'>Not found.</div>", 404
     users = db.rows_to_list(db.query("SELECT id, name FROM users WHERE active = 1 ORDER BY name"))
     publish = date.fromisoformat(stage["publish_date"])
@@ -472,6 +489,7 @@ def pipeline_assign_modal(stage_id):
     return render_template(
         "partials/assign_and_notify_modal.html",
         stage=stage, users=users, default_deadline=default_deadline.isoformat(), tight_deadline=tight_deadline,
+        stage_label=pipeline.STAGE_BY_KEY[stage["stage_key"]]["label"],
     )
 
 
