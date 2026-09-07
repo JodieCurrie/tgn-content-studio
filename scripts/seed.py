@@ -182,6 +182,38 @@ MONTHLY_PIPELINE_TEMPLATES = {
     ],
 }
 
+# Filler's opt-in staged pipelines (Part 23) — the same additive mechanism as
+# MONTHLY_PIPELINE_TEMPLATES above (seeded alongside each type's single flat
+# "Create X" task, only ever used once pipeline.start_output_pipeline() has
+# run for that specific output). "video" group ends at review_edit — Audio /
+# Review Audio are seeded here too (so their tasks exist to materialize
+# later) but only ever get created once pipeline.decide_filler_audio() adds
+# their pipeline_stages rows (see task_engine.py's dynamic-stage guard).
+# "design" group has no film/audio at all — Design Post takes Edit's place.
+_FILLER_VIDEO_TEMPLATES = [
+    ("admin", "Develop concept", 15, "develop_concept"),
+    ("production", "Film / record", 10, "film"),
+    ("production", "Edit & export", 5, "edit"),
+    ("admin", "Review content", 3, "review_edit"),
+    ("music", "Add/record audio", 2, "audio"),
+    ("admin", "Review audio", 1, "review_audio"),
+]
+_FILLER_DESIGN_TEMPLATES = [
+    ("admin", "Develop concept", 10, "develop_concept"),
+    ("production", "Design post", 4, "design_post"),
+    ("admin", "Review design", 2, "review_design"),
+]
+FILLER_PIPELINE_TEMPLATES = {
+    "tiktok_style": _FILLER_VIDEO_TEMPLATES,
+    "interview": _FILLER_VIDEO_TEMPLATES,
+    "preaching_teaching": _FILLER_VIDEO_TEMPLATES,
+    "carousel": _FILLER_DESIGN_TEMPLATES,
+    "normal_post": _FILLER_DESIGN_TEMPLATES,
+    "moving_scripture": _FILLER_DESIGN_TEMPLATES,
+    "quick_reel": _FILLER_DESIGN_TEMPLATES,
+    "scripture_expansion": _FILLER_DESIGN_TEMPLATES,
+}
+
 # task templates: content_type_key -> [(role_key, task_name, offset_days_before)]
 # targeted_short/targeted_long are deliberately absent here — they're seeded
 # from PIPELINE_SHOOT_TEMPLATES/PIPELINE_PRODUCTION_TEMPLATES instead (see
@@ -202,50 +234,32 @@ TASK_TEMPLATES = {
     ],
 
     # ---- Filler ----
-    "tiktok_style": [
-        ("production", "Film/create clip", 3), ("production", "Edit & export", 1),
-        ("admin", "Caption & schedule", 0),
-    ],
-    "interview": [
-        ("admin", "Book guest & prep questions", 6), ("production", "Film interview", 4),
-        ("production", "Edit & export", 1),
-    ],
-    "carousel": [
-        ("production", "Design carousel slides", 2), ("admin", "Write copy & schedule", 0),
-    ],
-    "normal_post": [
-        ("admin", "Write copy", 1), ("admin", "Schedule", 0),
-    ],
-    "moving_scripture": [
-        ("production", "Film & edit", 3), ("music", "Add background audio", 1),
-        ("admin", "Caption & schedule", 0),
-    ],
-    "quick_reel": [
-        ("production", "Film & edit", 2), ("admin", "Caption & schedule", 0),
-    ],
-    "scripture_expansion": [
-        ("production", "Film & edit", 2), ("admin", "Caption & schedule", 0),
-    ],
-    "preaching_teaching": [
-        ("production", "Cut & edit clip", 2), ("admin", "Caption & schedule", 0),
-    ],
+    # 8 of the 9 subtypes are opt-in pipeline-eligible (Part 23) — their
+    # default is now a SINGLE "Create X" task assigned to Jodie, due ~2
+    # weeks before publish; reassigning it away from her starts the staged
+    # workflow (see app/pipeline.py after_task_reassignment /
+    # FILLER_PIPELINE_TEMPLATES above). podcast_additional_highlight is
+    # deliberately left as its own small flat checklist — no pipeline.
+    "tiktok_style": [("admin", "Create TikTok Style Reel", 14)],
+    "interview": [("admin", "Create Interview / Studio", 14)],
+    "carousel": [("admin", "Create Carousel Post", 14)],
+    "normal_post": [("admin", "Create Normal / Static Post", 14)],
+    "moving_scripture": [("admin", "Create Moving Scripture", 14)],
+    "quick_reel": [("admin", "Create Quick Reel", 14)],
+    "scripture_expansion": [("admin", "Create Scripture Expansion", 14)],
+    "preaching_teaching": [("admin", "Create Preaching / Teaching", 14)],
     "podcast_additional_highlight": [
         ("admin", "Pick moment & write copy", 2), ("production", "Create graphic/clip", 1),
     ],
 
     # ---- Monthly ----
-    "podcast_episode": [
-        ("admin", "Prep questions/outline", 9), ("production", "Record episode", 7),
-        ("production", "Edit & export", 4), ("music", "Intro/outro audio", 3),
-        ("admin", "Review edit", 3), ("admin", "Schedule & publish", 0),
-    ],
+    # podcast_episode/testimony/course are opt-in pipeline-eligible too (Part
+    # 21/23) — same single "Create X" default as Filler above.
+    "podcast_episode": [("admin", "Create Podcast Episode", 14)],
     "podcast_highlight": [
         ("admin", "Pick question & write copy", 2), ("production", "Create graphic/clip", 1),
     ],
-    "course": [
-        ("admin", "Outline course content", 12), ("production", "Film & edit lessons", 8),
-        ("admin", "Review all lessons", 3),
-    ],
+    "course": [("admin", "Create Course / Educational", 14)],
     "course_highlight": [
         ("production", "Cut highlight from source lesson", 2), ("admin", "Approve & schedule", 0),
     ],
@@ -255,11 +269,7 @@ TASK_TEMPLATES = {
     "blog_video": [
         ("production", "Edit companion video", 4), ("admin", "Approve & schedule", 1),
     ],
-    "testimony": [
-        ("admin", "Reach out & coordinate", 9), ("production", "Film testimony", 7),
-        ("production", "Edit & export", 4), ("admin", "Review footage", 3),
-        ("admin", "Schedule & publish", 0),
-    ],
+    "testimony": [("admin", "Create Testimony", 14)],
 
     "custom": [
         ("admin", "Plan & schedule", 2),
@@ -316,7 +326,8 @@ def seed_data():
     type_ids = _seed_content_types()
     _seed_task_templates(type_ids)
     _migrate_targeted_video_pipeline(type_ids)
-    _seed_monthly_pipeline_templates(type_ids)
+    _migrate_opt_in_flat_tasks(type_ids)
+    _seed_opt_in_pipeline_templates(type_ids)
     _seed_creation_options(type_ids)
     user_ids = _seed_users()
     _seed_scheduling_rules(type_ids)
@@ -429,16 +440,20 @@ def _seed_task_templates(type_ids):
             )
 
 
-def _seed_monthly_pipeline_templates(type_ids):
-    """Additively seeds the opt-in Monthly Campaign pipeline templates
-    (Part 21) alongside each type's existing flat TASK_TEMPLATES — NOT a
-    delete-and-replace like _migrate_targeted_video_pipeline, since the flat
-    list stays the default and these only ever get used once a specific
-    campaign calls pipeline.start_output_pipeline(). Fingerprinted per type
-    on a 'develop_concept'-tagged template existing, so this is a no-op once
-    already seeded but safely re-fires (e.g. via Admin's "Sync" button) for
-    anyone upgrading."""
-    for ct_key, templates in MONTHLY_PIPELINE_TEMPLATES.items():
+def _seed_opt_in_pipeline_templates(type_ids):
+    """Additively seeds the opt-in staged-pipeline templates — Monthly's 3
+    (Part 21) and Filler's 8 (Part 23) — alongside each type's existing flat
+    TASK_TEMPLATES ("Create X") — NOT a delete-and-replace like
+    _migrate_targeted_video_pipeline, since the flat list stays the default
+    and these only ever get used once a specific output's pipeline has
+    started (pipeline.start_output_pipeline(), now triggered by reassigning
+    the flat task — see pipeline.after_task_reassignment). Fingerprinted per
+    type on a 'develop_concept'-tagged template existing, so this is a no-op
+    once already seeded but safely re-fires (e.g. via Admin's "Sync" button)
+    for anyone upgrading."""
+    all_templates = dict(MONTHLY_PIPELINE_TEMPLATES)
+    all_templates.update(FILLER_PIPELINE_TEMPLATES)
+    for ct_key, templates in all_templates.items():
         ct_id = type_ids.get(ct_key)
         if not ct_id:
             continue
@@ -522,6 +537,61 @@ def _migrate_targeted_video_pipeline(type_ids):
             for t in stale_stage_tagged:
                 dbmod.execute("DELETE FROM tasks WHERE id = ?", (t["id"],))
             if stale or stale_stage_tagged:
+                task_engine.generate_tasks_for_campaign(output["campaign_id"], only_new_output_type=ct_id)
+
+
+def _migrate_opt_in_flat_tasks(type_ids):
+    """One-time migration (Part 23): retrofits the new single "Create X"
+    flat-task shape onto every opt-in-eligible type's ALREADY-SEEDED
+    task_templates and already-scheduled outputs — needed because
+    _seed_task_templates() no-ops once any template row exists for a type,
+    so a live database (Jodie's) would otherwise keep its old multi-task
+    flat checklist forever. Fingerprinted per type on there being exactly
+    one flat (stage_key IS NULL) template whose name starts with "Create "
+    — a no-op once already migrated, safe to re-run. Only ever touches
+    outputs whose staged pipeline hasn't started yet and whose flat tasks
+    are still untouched (status='not_started'), same safety rule as
+    _migrate_targeted_video_pipeline."""
+    for ct_key in pipeline.OPT_IN_PIPELINE_TYPE_KEYS:
+        ct_id = type_ids.get(ct_key)
+        if not ct_id:
+            continue
+        new_template = TASK_TEMPLATES.get(ct_key)
+        if not new_template or len(new_template) != 1:
+            continue
+        already_migrated = dbmod.query_one(
+            """SELECT id FROM task_templates WHERE content_type_id = ? AND stage_key IS NULL
+               AND task_name = ?""",
+            (ct_id, new_template[0][1]),
+        )
+        flat_count = dbmod.query_one(
+            "SELECT COUNT(*) AS n FROM task_templates WHERE content_type_id = ? AND stage_key IS NULL", (ct_id,)
+        )
+        if already_migrated and flat_count and flat_count["n"] == 1:
+            continue
+
+        dbmod.execute("DELETE FROM task_templates WHERE content_type_id = ? AND stage_key IS NULL", (ct_id,))
+        role_key, name, offset = new_template[0]
+        dbmod.execute(
+            """INSERT INTO task_templates (content_type_id, role_key, task_name, offset_days_before, sort_order, stage_key)
+               VALUES (?,?,?,?,0,NULL)""",
+            (ct_id, role_key, name, offset),
+        )
+
+        outputs = dbmod.rows_to_list(
+            dbmod.query("SELECT * FROM content_outputs WHERE content_type_id = ?", (ct_id,))
+        )
+        for output in outputs:
+            if dbmod.query_one("SELECT id FROM pipeline_stages WHERE output_id = ? LIMIT 1", (output["id"],)):
+                continue  # already running its staged pipeline — leave it alone
+            stale = dbmod.rows_to_list(dbmod.query(
+                """SELECT id FROM tasks WHERE output_id = ? AND created_from_template = 1
+                   AND status = 'not_started' AND stage_key IS NULL""",
+                (output["id"],),
+            ))
+            for t in stale:
+                dbmod.execute("DELETE FROM tasks WHERE id = ?", (t["id"],))
+            if stale:
                 task_engine.generate_tasks_for_campaign(output["campaign_id"], only_new_output_type=ct_id)
 
 
