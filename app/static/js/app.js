@@ -325,11 +325,17 @@ document.addEventListener("click", (e) => {
   if (highlightsBtn) {
     fetch(`/pipeline-stages/${highlightsBtn.dataset.stageId}/highlights-modal`).then(r => r.text()).then(html => openModal(html));
   }
-  const startPipelineBtn = e.target.closest(".js-start-pipeline");
-  if (startPipelineBtn) {
-    const outputId = startPipelineBtn.dataset.outputId;
-    if (!confirm("Start the staged production workflow for this content? Any untouched checklist tasks will be replaced with the new Develop Concept → Film/Record → Edit → Review → Highlights steps.")) return;
-    tgnFetch(`/api/outputs/${outputId}/start-pipeline`, { method: "POST", body: "{}" })
+  const alreadyRecordedBtn = e.target.closest(".js-already-recorded");
+  if (alreadyRecordedBtn) {
+    // Filler-video's skip option (Part 23): confirm_film_with_delivery has
+    // no hard dependency on a meeting ever having been scheduled — this
+    // just opens the same hand-off form the "Did this happen?" flow does.
+    fetch(`/pipeline-stages/${alreadyRecordedBtn.dataset.stageId}/delivery-modal`).then(r => r.text()).then(html => openModal(html));
+  }
+  const decideAudioBtn = e.target.closest(".js-decide-audio");
+  if (decideAudioBtn) {
+    const { stageId, wantsAudio } = decideAudioBtn.dataset;
+    tgnFetch(`/api/pipeline-stages/${stageId}/decide-audio`, { method: "POST", body: JSON.stringify({ wants_audio: wantsAudio === "1" }) })
       .then(() => window.location.reload())
       .catch((err) => alert(err.message));
   }
@@ -392,10 +398,12 @@ document.addEventListener("submit", async (e) => {
     errBox.style.display = "none";
     const { campaignId, stageKey } = form.dataset;
     const participantIds = Array.from(form.querySelectorAll('input[name=participant_ids]:checked')).map(cb => parseInt(cb.value, 10));
+    const bunchWithStageIds = Array.from(form.querySelectorAll('input[name=bunch_with_stage_ids]:checked')).map(cb => parseInt(cb.value, 10));
     const payload = {
       start: document.getElementById("sm-start").value,
       end: document.getElementById("sm-end").value,
       participant_ids: participantIds,
+      bunch_with_stage_ids: bunchWithStageIds,
     };
     try {
       await tgnFetch(`/api/campaigns/${campaignId}/pipeline/${stageKey}/schedule`, { method: "POST", body: JSON.stringify(payload) });
