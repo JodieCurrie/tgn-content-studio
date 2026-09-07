@@ -325,6 +325,14 @@ document.addEventListener("click", (e) => {
   if (highlightsBtn) {
     fetch(`/pipeline-stages/${highlightsBtn.dataset.stageId}/highlights-modal`).then(r => r.text()).then(html => openModal(html));
   }
+  const startPipelineBtn = e.target.closest(".js-start-pipeline");
+  if (startPipelineBtn) {
+    const outputId = startPipelineBtn.dataset.outputId;
+    if (!confirm("Start the staged production workflow for this content? Any untouched checklist tasks will be replaced with the new Develop Concept → Film/Record → Edit → Review → Highlights steps.")) return;
+    tgnFetch(`/api/outputs/${outputId}/start-pipeline`, { method: "POST", body: "{}" })
+      .then(() => window.location.reload())
+      .catch((err) => alert(err.message));
+  }
   const markReceivedBtn = e.target.closest(".js-mark-received");
   if (markReceivedBtn) {
     const stageId = markReceivedBtn.dataset.stageId;
