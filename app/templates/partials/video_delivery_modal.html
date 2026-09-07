@@ -14,7 +14,7 @@
     </select>
 
     <label class="field-label">Deadline</label>
-    <input class="field-input" type="date" name="deadline" id="vd-deadline" required style="margin-bottom:14px;">
+    <input class="field-input" type="date" name="deadline" id="vd-deadline" value="{{ default_deadline or '' }}" required style="margin-bottom:14px;">
 
     <label class="field-label">Note (optional)</label>
     <textarea class="field-textarea" name="note" id="vd-note" placeholder="Anything they should know..." style="margin-bottom:14px;"></textarea>

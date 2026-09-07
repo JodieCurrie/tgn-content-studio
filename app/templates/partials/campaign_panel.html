@@ -121,13 +121,29 @@
         {% if o.assigned_name %}<span class="page-subtitle">Assigned: {{ o.assigned_name }}</span>{% endif %}
       </div>
 
+      {% if o.can_start_pipeline %}
+      {# Part 21: Monthly Campaign types (Podcast Episode/Testimony/Course)
+         keep their plain flat checklist below by default — this switches
+         just THIS campaign over to the staged Develop Concept -> Film/
+         Record -> Edit -> Review Edit -> [Select Highlight Reels] pipeline,
+         the same shape Targeted Video always uses. #}
+      <div style="margin-top:10px; border-top:1px solid var(--border); padding-top:8px;">
+        <button type="button" class="btn btn-sm btn-outline js-start-pipeline" data-output-id="{{ o.id }}">🎬 Start production workflow</button>
+        <div class="page-subtitle" style="margin-top:4px;">Switches this to the staged Develop Concept → Film/Record → Edit → Review → Highlights pipeline, with meeting scheduling and hand-off emails — for when you're delegating this one rather than making it yourself.</div>
+      </div>
+      {% endif %}
+
       {% if o.pipeline_stages %}
-      {# Production-level pipeline (Part 14-18+), branching per output from
-         the shared shoot tracker above: Edit -> Review Edit -> [Short: Audio
-         -> Review Audio -> Final Compilation] / [Long: Select Highlight
-         Reels]. Edit/Audio are plain checklists once assigned; Review
-         stages are an approve/reject gate; Compilation/Highlights finish
-         via an admin "Mark as received" click, not a checkbox. #}
+      {# Production-level pipeline (Part 14-18+ for Targeted, Part 21 for an
+         opted-in Monthly Campaign): Edit -> Review Edit -> [Targeted Short:
+         Audio -> Review Audio -> Final Compilation] / [Targeted Long +
+         Monthly: Select Highlight Reels]. A Monthly pipeline also has its
+         own Develop Concept (plain task) and Film/Record (a real meeting,
+         same as Targeted's — just living here instead of a shared shoot
+         tier, since Monthly has no sibling output). Edit is a plain
+         checklist once assigned; Review stages are an approve/reject gate;
+         Compilation/Highlights finish via an admin "Mark as received"
+         click, not a checkbox. #}
       <div style="margin-top:10px; border-top:1px solid var(--border); padding-top:8px;">
         <div class="page-subtitle" style="font-weight:700; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">Production</div>
         {% for stage in o.pipeline_stages %}
@@ -138,7 +154,35 @@
             {% if not stage.unlocked %}<span class="page-subtitle">🔒 locked until the previous stage is complete</span>{% endif %}
           </div>
 
-          {% if stage.is_review_stage and stage.unlocked %}
+          {% if stage.is_meeting_stage and stage.unlocked %}
+            {% if stage.status == 'complete' %}
+            <div class="page-subtitle" style="padding-left:18px;">
+              {{ stage.meeting_start|friendly_datetime }}{% if stage.participant_names %} · {{ stage.participant_names|join(', ') }}{% endif %}
+              {% if stage.calendar_link %} · <a href="{{ stage.calendar_link }}" target="_blank" rel="noopener">Calendar</a>{% endif %}
+            </div>
+            {% if stage.recipient_name %}
+            <div class="page-subtitle" style="padding-left:18px;">Edit assigned to {{ stage.recipient_name }}, due {{ stage.delivery_deadline|friendly_date }}{% if not stage.delivery_email_sent_at %} — email wasn't sent, let them know directly{% endif %}.</div>
+            {% endif %}
+            {% elif stage.needs_scheduling %}
+            <div style="padding-left:18px; margin-top:2px;">
+              <button type="button" class="btn btn-sm btn-outline js-schedule-meeting" data-campaign-id="{{ c.id }}" data-stage-key="{{ stage.stage_key }}">📅 Schedule this meeting</button>
+            </div>
+            {% elif stage.needs_confirmation %}
+            <div style="padding-left:18px; margin-top:2px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <span class="page-subtitle">⏳ {{ stage.meeting_start|friendly_datetime }} has passed — awaiting confirmation</span>
+              <button type="button" class="btn btn-sm btn-outline js-confirm-meeting" data-stage-id="{{ stage.id }}">Did this happen?</button>
+            </div>
+            {% elif stage.scheduled_upcoming %}
+            <div style="padding-left:18px; margin-top:2px;">
+              <div class="page-subtitle">{{ stage.meeting_start|friendly_datetime }}{% if stage.participant_names %} · {{ stage.participant_names|join(', ') }}{% endif %}</div>
+              <div style="display:flex; gap:6px; margin-top:2px; flex-wrap:wrap;">
+                {% if stage.calendar_link %}<a href="{{ stage.calendar_link }}" target="_blank" rel="noopener" class="pill">📅 Calendar</a>{% endif %}
+                <button type="button" class="btn btn-sm btn-ghost js-schedule-meeting" data-campaign-id="{{ c.id }}" data-stage-key="{{ stage.stage_key }}">Reschedule</button>
+              </div>
+            </div>
+            {% endif %}
+
+          {% elif stage.is_review_stage and stage.unlocked %}
             {% if stage.status == 'complete' %}
             <div class="page-subtitle" style="padding-left:18px;">✅ Approved{% if stage.review_notes %} — {{ stage.review_notes }}{% endif %}</div>
             {% else %}
@@ -190,7 +234,7 @@
 
           {% elif stage.stage_key == 'highlights' and stage.unlocked %}
             {% if stage.status == 'complete' %}
-            <div class="page-subtitle" style="padding-left:18px;">✅ Received — clips attached to Highlight/Snippet 1 &amp; 2</div>
+            <div class="page-subtitle" style="padding-left:18px;">✅ Received — clips attached to the follow-up content</div>
             {% elif stage.has_submission %}
             <div style="padding-left:18px; margin-top:2px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
               {% for clip in stage.submitted_clips %}<a href="{{ clip.url }}" target="_blank" rel="noopener" class="pill">🎬 {{ clip.label or 'Clip' }}</a>{% endfor %}
