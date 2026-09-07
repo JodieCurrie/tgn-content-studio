@@ -3,10 +3,12 @@
 {% block content %}
 <div class="page-header"><div><h1 class="page-title">Content Types</h1><div class="page-subtitle">The colour-coded key. Each type carries its own colour, defaults, and requirements.</div></div></div>
 
-<table class="admin-table" style="margin-bottom:24px;">
+{% for group in groups %}
+<div class="section-title" style="margin-top:{{ '0' if loop.first else '24px' }};">{{ group.icon }} {{ group.label }} <span class="page-subtitle" style="font-weight:400;">({{ group.types|length }})</span></div>
+<table class="admin-table" style="margin-bottom:8px;">
   <thead><tr><th></th><th>Label</th><th>Category</th><th>Filler?</th><th>Needs</th><th>Lead time</th><th></th></tr></thead>
   <tbody>
-    {% for t in types %}
+    {% for t in group.types %}
     <tr style="opacity:{{ 0.5 if t.archived else 1 }}">
       <td><span class="color-swatch" style="background:{{ t.color }}"></span></td>
       <td>{{ t.label }}</td>
@@ -35,6 +37,7 @@
     {% endfor %}
   </tbody>
 </table>
+{% endfor %}
 
 <div class="section-title">Add a new content type</div>
 <div class="card card-pad">
