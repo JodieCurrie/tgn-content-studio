@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Week of {{ start|friendly_date }} — TGN Content Studio{% endblock %}
+{% block title %}{{ start|friendly_date }} – {{ end|friendly_date }} — TGN Content Studio{% endblock %}
 {% block content %}
 <div class="page-header">
   <div>
-    <h1 class="page-title">This Week</h1>
+    <h1 class="page-title">Next 2 Weeks</h1>
     <div class="page-subtitle">{{ start|friendly_date_long }} – {{ end|friendly_date_long }}</div>
   </div>
   <button class="btn btn-primary" id="create-content-btn">+ Create Content</button>
@@ -56,7 +56,7 @@
 </div>
 {% endif %}
 
-<div class="section-title">Tasks due this week</div>
+<div class="section-title">Your tasks (next 2 weeks)</div>
 <div class="card">
   {% if tasks_this_week %}
     {% for t in tasks_this_week %}
@@ -64,13 +64,14 @@
       <span class="status-dot status-{{ t.status }}"></span>
       <div style="flex:1;">
         <strong>{{ t.task_name }}</strong> — {{ t.campaign_title }}
-        <div class="page-subtitle" style="margin:0;">Due {{ t.due_date|friendly_date }}{% if t.assigned_name %} · {{ t.assigned_name }}{% endif %}</div>
+        <div class="page-subtitle" style="margin:0;">{% if t.assigned_name %}{{ t.assigned_name }}{% endif %}</div>
       </div>
       <span class="pill">{{ t.status|status_label }}</span>
+      {% if t.due_date %}<span class="pill" title="Deadline">📅 {{ t.due_date|friendly_date }}</span>{% endif %}
     </div>
     {% endfor %}
   {% else %}
-  <div class="empty-state">Nothing due this week.</div>
+  <div class="empty-state">Nothing assigned to you in this window.</div>
   {% endif %}
 </div>
 {% endblock %}
