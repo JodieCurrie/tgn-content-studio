@@ -149,6 +149,39 @@ PIPELINE_PRODUCTION_TEMPLATES = {
     ],
 }
 
+# Monthly Campaign pipeline templates (Part 21) — OPT-IN per campaign, unlike
+# the two tables above which are always-on for every Targeted output. These
+# rows exist in task_templates from the start, but task_engine.py skips
+# creating the actual tasks from them until pipeline.start_output_pipeline()
+# has been called for that specific campaign (see the
+# monthly_pipeline_started check there) — until then, that content type's
+# existing flat TASK_TEMPLATES list below still runs as normal. No shared
+# "shoot" tier here (a Monthly campaign only ever has one output), so
+# develop_concept/film live at the same per-output level as edit onward —
+# see app/pipeline.py PRODUCTION_STAGES_BY_TYPE.
+MONTHLY_PIPELINE_TEMPLATES = {
+    "podcast_episode": [
+        ("admin", "Develop concept", 30, "develop_concept"),
+        ("production", "Film / record", 20, "film"),
+        ("production", "Edit & export", 10, "edit"),
+        ("admin", "Review edit", 5, "review_edit"),
+        ("admin", "Select highlight reels", 3, "highlights"),
+    ],
+    "testimony": [
+        ("admin", "Develop concept", 30, "develop_concept"),
+        ("production", "Film / record", 20, "film"),
+        ("production", "Edit & export", 10, "edit"),
+        ("admin", "Review edit", 5, "review_edit"),
+    ],
+    "course": [
+        ("admin", "Develop concept", 30, "develop_concept"),
+        ("production", "Film / record", 20, "film"),
+        ("production", "Edit & export", 10, "edit"),
+        ("admin", "Review edit", 5, "review_edit"),
+        ("admin", "Select highlight reels", 3, "highlights"),
+    ],
+}
+
 # task templates: content_type_key -> [(role_key, task_name, offset_days_before)]
 # targeted_short/targeted_long are deliberately absent here — they're seeded
 # from PIPELINE_SHOOT_TEMPLATES/PIPELINE_PRODUCTION_TEMPLATES instead (see
@@ -283,6 +316,7 @@ def seed_data():
     type_ids = _seed_content_types()
     _seed_task_templates(type_ids)
     _migrate_targeted_video_pipeline(type_ids)
+    _seed_monthly_pipeline_templates(type_ids)
     _seed_creation_options(type_ids)
     user_ids = _seed_users()
     _seed_scheduling_rules(type_ids)
@@ -392,6 +426,33 @@ def _seed_task_templates(type_ids):
             dbmod.execute(
                 "INSERT INTO task_templates (content_type_id, role_key, task_name, offset_days_before, sort_order, stage_key) VALUES (?,?,?,?,?,NULL)",
                 (ct_id, role_key, name, offset, order),
+            )
+
+
+def _seed_monthly_pipeline_templates(type_ids):
+    """Additively seeds the opt-in Monthly Campaign pipeline templates
+    (Part 21) alongside each type's existing flat TASK_TEMPLATES — NOT a
+    delete-and-replace like _migrate_targeted_video_pipeline, since the flat
+    list stays the default and these only ever get used once a specific
+    campaign calls pipeline.start_output_pipeline(). Fingerprinted per type
+    on a 'develop_concept'-tagged template existing, so this is a no-op once
+    already seeded but safely re-fires (e.g. via Admin's "Sync" button) for
+    anyone upgrading."""
+    for ct_key, templates in MONTHLY_PIPELINE_TEMPLATES.items():
+        ct_id = type_ids.get(ct_key)
+        if not ct_id:
+            continue
+        already_seeded = dbmod.query_one(
+            "SELECT id FROM task_templates WHERE content_type_id = ? AND stage_key = 'develop_concept'", (ct_id,)
+        )
+        if already_seeded:
+            continue
+        for order, (role_key, name, offset, stage_key) in enumerate(templates):
+            dbmod.execute(
+                """INSERT INTO task_templates
+                   (content_type_id, role_key, task_name, offset_days_before, sort_order, stage_key)
+                   VALUES (?,?,?,?,?,?)""",
+                (ct_id, role_key, name, offset, 100 + order, stage_key),
             )
 
 
