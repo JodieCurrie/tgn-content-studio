@@ -261,13 +261,11 @@ def get_campaign_detail(campaign_id):
         # Targeted Video — Short/YouTube: the 7-stage production pipeline,
         # each stage with its own tasks (rendered separately from the
         # campaign's plain task list below). [] for every other type, unless
-        # a Monthly Campaign type has opted in (see can_start_pipeline).
+        # an opt-in type (Monthly/Filler) has started its own staged
+        # pipeline — see is_opt_in_eligible, used by the panel to hint that
+        # reassigning the flat "Create X" task is what starts it.
         o["pipeline_stages"] = pipeline.get_stages_with_status(o["id"])
-        # Part 21: a Monthly Campaign type that hasn't started its staged
-        # pipeline yet shows a "Start production workflow" button instead.
-        o["can_start_pipeline"] = (
-            pipeline.is_monthly_pipeline_eligible(o["content_type_id"]) and not o["pipeline_stages"]
-        )
+        o["is_opt_in_eligible"] = pipeline.is_opt_in_pipeline_eligible(o["content_type_id"])
 
     tasks = db.rows_to_list(
         db.query(

@@ -32,14 +32,15 @@ def generate_tasks_for_campaign(campaign_id, only_new_output_type=None):
         # content type is a no-op here.
         pipeline.ensure_pipeline_for_output(output["id"])
 
-        # A Monthly Campaign type (podcast_episode/testimony/course) keeps
-        # its plain flat checklist by default — its staged-pipeline
-        # templates (develop_concept/film/edit/review_edit/highlights) only
-        # get created once that ONE campaign has opted in via
-        # pipeline.start_output_pipeline() (Part 21), which is what actually
-        # creates this output's pipeline_stages rows. Until then, skip them
-        # here so they don't appear alongside the flat list.
-        monthly_pipeline_started = bool(
+        # An opt-in pipeline type (Monthly's podcast_episode/testimony/
+        # course, or Filler's 8 video/design subtypes, Part 21/23) keeps its
+        # plain flat "Create X" checklist by default — its staged-pipeline
+        # templates only get created once that ONE output has opted in via
+        # pipeline.start_output_pipeline() (now triggered by reassigning the
+        # flat task, see pipeline.after_task_reassignment), which is what
+        # actually creates this output's pipeline_stages rows. Until then,
+        # skip them here so they don't appear alongside the flat list.
+        output_pipeline_started = bool(
             db.query_one("SELECT id FROM pipeline_stages WHERE output_id = ? LIMIT 1", (output["id"],))
         )
 
@@ -71,14 +72,26 @@ def generate_tasks_for_campaign(campaign_id, only_new_output_type=None):
             ):
                 continue
 
-            if pipeline.is_monthly_pipeline_eligible(output["content_type_id"]):
-                if monthly_pipeline_started:
+            if pipeline.is_opt_in_pipeline_eligible(output["content_type_id"]):
+                if output_pipeline_started:
                     # The staged pipeline has taken over for this output —
                     # never regenerate its old flat (stage_key IS NULL)
                     # checklist templates, or start_output_pipeline()'s
                     # one-time cleanup of untouched flat tasks would just be
                     # immediately undone by this very call.
                     if not tpl["stage_key"]:
+                        continue
+                    # Some stages are added dynamically well after the
+                    # pipeline starts (Filler-video's optional Audio/Review
+                    # Audio, only inserted by pipeline.decide_filler_audio
+                    # once Jodie says yes) — only materialize a staged
+                    # template's task once ITS OWN pipeline_stages row
+                    # actually exists, or a task would appear (and get
+                    # auto-assigned) for a stage nobody has activated yet.
+                    if not db.query_one(
+                        "SELECT id FROM pipeline_stages WHERE output_id = ? AND stage_key = ?",
+                        (output["id"], tpl["stage_key"]),
+                    ):
                         continue
                 else:
                     # Not opted in yet — keep showing the flat checklist,

@@ -78,6 +78,7 @@ _COLUMN_MIGRATIONS = [
     ("pipeline_stages", "submission_notes", "TEXT"),
     ("pipeline_stages", "submitted_at", "TEXT"),
     ("pipeline_stages", "highlight_candidates", "TEXT"),
+    ("pipeline_stages", "audio_decision", "TEXT"),
     ("campaigns", "drive_folder_id", "TEXT"),
     ("campaigns", "drive_folder_link", "TEXT"),
     ("campaigns", "script_youtube", "TEXT NOT NULL DEFAULT ''"),

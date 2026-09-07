@@ -74,8 +74,11 @@ from . import email_integration
 # ---------------------------------------------------------------------------
 SHOOT_STAGE_KEYS = ("script", "concept", "film")
 MEETING_STAGE_KEYS = ("concept", "film")
-REVIEW_STAGE_KEYS = ("review_edit", "review_audio")
-REOPENS_STAGE = {"review_edit": "edit", "review_audio": "audio"}
+# review_design (Filler's design workflow, Part 23) reuses the exact same
+# approve/reject-loop mechanics as review_edit/review_audio — reopening
+# design_post on a reject, same emails, same UI.
+REVIEW_STAGE_KEYS = ("review_edit", "review_audio", "review_design")
+REOPENS_STAGE = {"review_edit": "edit", "review_audio": "audio", "review_design": "design_post"}
 SUBMISSION_STAGE_KEYS = ("compilation", "highlights")
 
 PRODUCTION_STAGES_BY_TYPE = {
@@ -93,6 +96,27 @@ PRODUCTION_STAGES_BY_TYPE = {
     "podcast_episode": ["develop_concept", "film", "edit", "review_edit", "highlights"],
     "testimony": ["develop_concept", "film", "edit", "review_edit"],
     "course": ["develop_concept", "film", "edit", "review_edit", "highlights"],
+
+    # Filler "video" group (Part 23, opt-in like Monthly): Develop Concept ->
+    # Film/Record -> Edit -> Review Content, statically declared here —
+    # ending at review_edit deliberately, NOT audio/review_audio. Whether a
+    # musician gets involved at all is a per-post decision Jodie makes only
+    # AFTER Review Content approves (decide_filler_audio), not something
+    # every filler video goes through — so those two stages get inserted
+    # dynamically into pipeline_stages only when she says yes, rather than
+    # existing from the start like every other stage set in this dict.
+    "tiktok_style": ["develop_concept", "film", "edit", "review_edit"],
+    "interview": ["develop_concept", "film", "edit", "review_edit"],
+    "preaching_teaching": ["develop_concept", "film", "edit", "review_edit"],
+
+    # Filler "design" group (Part 23, opt-in): Develop Concept -> Design Post
+    # -> Review Design. No film/audio at all — a design hand-off (notes +
+    # inspiration links) takes the place of Edit, via assign_and_notify.
+    "carousel": ["develop_concept", "design_post", "review_design"],
+    "normal_post": ["develop_concept", "design_post", "review_design"],
+    "moving_scripture": ["develop_concept", "design_post", "review_design"],
+    "quick_reel": ["develop_concept", "design_post", "review_design"],
+    "scripture_expansion": ["develop_concept", "design_post", "review_design"],
 }
 
 STAGE_BY_KEY = {
@@ -109,6 +133,11 @@ STAGE_BY_KEY = {
     "review_audio": {"key": "review_audio", "label": "Review Audio"},
     "compilation": {"key": "compilation", "label": "Final Compilation"},
     "highlights": {"key": "highlights", "label": "Select Highlight Reels"},
+    # Filler design group only (Part 23) — design_post is a plain hand-off
+    # task (like Edit), review_design is an approve/reject gate (like
+    # Review Edit), reusing all the same mechanics under new labels.
+    "design_post": {"key": "design_post", "label": "Design Post"},
+    "review_design": {"key": "review_design", "label": "Review Design"},
 }
 
 # The two output types the ALWAYS-ON Targeted Video pipeline applies to —
@@ -117,13 +146,20 @@ STAGE_BY_KEY = {
 PIPELINE_CONTENT_TYPE_KEYS = ("targeted_short", "targeted_long")
 
 # Monthly Campaign types that CAN opt into a staged production pipeline
-# (Part 21), on a per-campaign basis, via start_output_pipeline() — unlike
-# PIPELINE_CONTENT_TYPE_KEYS above, a campaign of one of these types starts
-# out on the plain flat checklist and only switches over when an admin
-# clicks "Start production workflow" on that specific campaign (Jodie: most
-# Monthly content she still makes herself, so she didn't want the full
-# back-and-forth forced on everything of this type).
+# (Part 21), on a per-campaign basis, via start_output_pipeline(). Part 23
+# extends the same opt-in mechanism to 8 Filler subtypes, split into a
+# "video" group (its own Film/Record + optional Audio) and a "design" group
+# (a Design Post hand-off instead). Every opt-in-eligible type keeps its
+# plain flat checklist by default — a single "Create X" task assigned to
+# Jodie (see scripts/seed.py TASK_TEMPLATES) — and only switches over to the
+# staged pipeline when that task gets reassigned away from her (see
+# after_task_reassignment), which replaced the old explicit "Start
+# production workflow" button for both Monthly and Filler.
 MONTHLY_PIPELINE_TYPE_KEYS = ("podcast_episode", "testimony", "course")
+FILLER_VIDEO_PIPELINE_TYPE_KEYS = ("tiktok_style", "interview", "preaching_teaching")
+FILLER_DESIGN_PIPELINE_TYPE_KEYS = ("carousel", "normal_post", "moving_scripture", "quick_reel", "scripture_expansion")
+FILLER_PIPELINE_TYPE_KEYS = FILLER_VIDEO_PIPELINE_TYPE_KEYS + FILLER_DESIGN_PIPELINE_TYPE_KEYS
+OPT_IN_PIPELINE_TYPE_KEYS = MONTHLY_PIPELINE_TYPE_KEYS + FILLER_PIPELINE_TYPE_KEYS
 
 # Which follow-up content type a monthly pipeline's delivered highlight
 # clips get fed into once "Mark as received" fires (mirrors Targeted's
@@ -147,9 +183,14 @@ def is_pipeline_content_type_id(content_type_id):
     return bool(row) and row["key"] in PIPELINE_CONTENT_TYPE_KEYS
 
 
-def is_monthly_pipeline_eligible(content_type_id):
+def is_opt_in_pipeline_eligible(content_type_id):
     row = db.query_one("SELECT key FROM content_types WHERE id = ?", (content_type_id,))
-    return bool(row) and row["key"] in MONTHLY_PIPELINE_TYPE_KEYS
+    return bool(row) and row["key"] in OPT_IN_PIPELINE_TYPE_KEYS
+
+
+def is_filler_video_pipeline_eligible(content_type_id):
+    row = db.query_one("SELECT key FROM content_types WHERE id = ?", (content_type_id,))
+    return bool(row) and row["key"] in FILLER_VIDEO_PIPELINE_TYPE_KEYS
 
 
 def _content_type_key(content_type_id):
@@ -205,7 +246,7 @@ def start_output_pipeline(output_id, actor_id=None):
     output = db.row_to_dict(db.query_one("SELECT * FROM content_outputs WHERE id = ?", (output_id,)))
     if not output:
         raise ValueError("No such content output.")
-    if not is_monthly_pipeline_eligible(output["content_type_id"]):
+    if not is_opt_in_pipeline_eligible(output["content_type_id"]):
         raise ValueError("This content type doesn't have an opt-in production pipeline.")
     if db.query_one("SELECT id FROM pipeline_stages WHERE output_id = ? LIMIT 1", (output_id,)):
         raise ValueError("The production workflow is already running for this content.")
@@ -233,6 +274,32 @@ def start_output_pipeline(output_id, actor_id=None):
 
     _log(output["campaign_id"], f"Started the staged production workflow for {_output_type_label(output)}.")
     return get_stages_with_status(output_id)
+
+
+def after_task_reassignment(task_id, previous_assigned_user_id):
+    """Part 23: reassigning an opt-in type's single default 'Create X' task
+    away from whoever held it is now what starts the staged pipeline, for
+    both Monthly and Filler — replacing the old explicit 'Start production
+    workflow' button. Called from PATCH /api/tasks/<id> with the task's
+    assignee BEFORE the update was applied. No-ops for anything that isn't
+    exactly this situation: a non-pipeline task, a stage-tagged task
+    (already inside a running pipeline), a reassignment back to the same
+    person, a non-opt-in-eligible type, or an output whose pipeline is
+    already running."""
+    task = db.row_to_dict(db.query_one("SELECT * FROM tasks WHERE id = ?", (task_id,)))
+    if not task or not task["output_id"] or task["stage_key"]:
+        return
+    if task["assigned_user_id"] == previous_assigned_user_id:
+        return
+    output = db.row_to_dict(db.query_one("SELECT * FROM content_outputs WHERE id = ?", (task["output_id"],)))
+    if not output or not is_opt_in_pipeline_eligible(output["content_type_id"]):
+        return
+    if db.query_one("SELECT id FROM pipeline_stages WHERE output_id = ? LIMIT 1", (output["id"],)):
+        return
+    try:
+        start_output_pipeline(output["id"])
+    except ValueError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +367,7 @@ def get_stages_with_status(output_id):
     output = db.row_to_dict(db.query_one("SELECT * FROM content_outputs WHERE id = ?", (output_id,)))
     if not output:
         return []
+    ct_key = _content_type_key(output["content_type_id"])
     shoot = get_shoot_stages_with_status(output["campaign_id"])
     # A content type with no shared shoot tier at all (e.g. a Monthly
     # pipeline output, which has none) has nothing upstream to wait on, so
@@ -352,9 +420,20 @@ def get_stages_with_status(output_id):
             entry["needs_confirmation"] = unlocked and has_meeting and meeting_passed and not confirmed
             entry["scheduled_upcoming"] = unlocked and has_meeting and not meeting_passed and not confirmed and status != "complete"
             entry["recipient_name"] = _name_for_user_id(row.get("delivery_recipient_user_id"))
+            # "Already recorded" (skip straight to the hand-off) and
+            # "bunch with another shoot" are Filler-video-only additions
+            # (Part 23) — Targeted/Monthly's own film scheduling is
+            # unchanged.
+            entry["is_filler_video_film"] = stage_key == "film" and ct_key in FILLER_VIDEO_PIPELINE_TYPE_KEYS
         if stage_key in REVIEW_STAGE_KEYS:
             entry["needs_review"] = unlocked and status != "complete"
-        if stage_key == "audio":
+            if stage_key == "review_edit" and ct_key in FILLER_VIDEO_PIPELINE_TYPE_KEYS:
+                # Filler-video's optional Audio Creation branch: once Review
+                # Content approves, Jodie is asked yes/no about sending it to
+                # a musician (decide_filler_audio) — audio/review_audio don't
+                # exist as stages at all until she says yes.
+                entry["needs_audio_decision"] = status == "complete" and not row.get("audio_decision")
+        if stage_key in ("audio", "design_post"):
             entry["needs_assignment"] = unlocked and status != "complete" and not row.get("delivery_recipient_user_id")
             entry["recipient_name"] = _name_for_user_id(row.get("delivery_recipient_user_id"))
         if stage_key == "highlights":
@@ -526,14 +605,21 @@ def _notify_compilation_ready(stage_row):
 # ---------------------------------------------------------------------------
 # Meeting scheduling (Concept Hashout / Film-Record) — campaign-scoped
 # ---------------------------------------------------------------------------
-def schedule_meeting(campaign_id, stage_key, start_iso, end_iso, participant_ids):
+def schedule_meeting(campaign_id, stage_key, start_iso, end_iso, participant_ids, bunch_with_stage_ids=None):
     """Creates the meeting the first time, or updates it in place on a
     reschedule (same DB row, same Calendar event — PATCHed rather than
     duplicated). Returns the refreshed stage list — the shoot's shared list
     for a Targeted campaign-scoped stage, or this output's own list for a
-    Monthly pipeline's output-scoped "film" (Monthly has no shared shoot
-    tier, so its meeting stages live on the single output instead —
-    see PRODUCTION_STAGES_BY_TYPE)."""
+    Monthly/Filler pipeline's output-scoped "film" (no shared shoot tier, so
+    its meeting stages live on the single output instead — see
+    PRODUCTION_STAGES_BY_TYPE).
+
+    bunch_with_stage_ids (Filler-video only, Part 23): other outputs' own
+    Film/Record stages to fold into this SAME session — one calendar event,
+    one shoot, covering several filler posts at once — rather than creating
+    a separate meeting for each. Each one gets the same time/participants/
+    calendar event copied onto its row; see unscheduled_filler_film_candidates
+    for how the UI finds candidates to offer."""
     if stage_key not in MEETING_STAGE_KEYS:
         raise ValueError(f"'{stage_key}' isn't a schedulable pipeline stage.")
     stage = db.row_to_dict(
@@ -592,9 +678,53 @@ def schedule_meeting(campaign_id, stage_key, start_iso, end_iso, participant_ids
     except Exception as e:
         _log(campaign_id, f"Saved the meeting time for \u201c{title}\u201d, but the Calendar event couldn't be saved: {e}")
 
+    if bunch_with_stage_ids:
+        primary = _get_stage_row_by_id(stage["id"])
+        for sid in bunch_with_stage_ids:
+            if sid == stage["id"]:
+                continue
+            other = _get_stage_row_by_id(sid)
+            if not other or other["stage_key"] != "film" or not other.get("output_id"):
+                continue
+            db.execute(
+                """UPDATE pipeline_stages
+                   SET meeting_start = ?, meeting_end = ?, participant_user_ids = ?, meeting_confirmed_at = NULL,
+                       calendar_event_id = ?, calendar_link = ?, meet_link = ?
+                   WHERE id = ?""",
+                (
+                    primary["meeting_start"], primary["meeting_end"], primary["participant_user_ids"],
+                    primary["calendar_event_id"], primary["calendar_link"], primary["meet_link"], sid,
+                ),
+            )
+            other_output = db.row_to_dict(db.query_one("SELECT campaign_id FROM content_outputs WHERE id = ?", (other["output_id"],)))
+            if other_output:
+                _log(other_output["campaign_id"], f"Bunched into the Film/Record session for \u201c{title}\u201d.")
+
     if stage.get("output_id"):
         return get_stages_with_status(stage["output_id"])
     return get_shoot_stages_with_status(campaign_id)
+
+
+def unscheduled_filler_film_candidates(exclude_output_id=None):
+    """Other Filler-video outputs whose Film/Record hasn't been scheduled
+    yet \u2014 offered as "bunch with this shoot too" options when scheduling one
+    of them (Part 23, Filler-only)."""
+    placeholders = ",".join("?" for _ in FILLER_VIDEO_PIPELINE_TYPE_KEYS)
+    rows = db.rows_to_list(
+        db.query(
+            f"""SELECT ps.id AS stage_id, ps.output_id, c.id AS campaign_id, c.title AS campaign_title,
+                      o.publish_date, ct.label AS type_label
+               FROM pipeline_stages ps
+               JOIN content_outputs o ON o.id = ps.output_id
+               JOIN campaigns c ON c.id = o.campaign_id
+               JOIN content_types ct ON ct.id = o.content_type_id
+               WHERE ps.stage_key = 'film' AND ps.meeting_start IS NULL AND ps.output_id IS NOT NULL
+                 AND ps.output_id != COALESCE(?, -1) AND ct.key IN ({placeholders})
+               ORDER BY o.publish_date""",
+            (exclude_output_id, *FILLER_VIDEO_PIPELINE_TYPE_KEYS),
+        )
+    )
+    return rows
 
 
 def pending_confirmations_for_admin():
@@ -753,7 +883,7 @@ def _assign_task(output_id, stage_key, recipient_user_id, deadline_iso, note="")
 # ---------------------------------------------------------------------------
 def assign_and_notify(stage_id, recipient_user_id, deadline_iso, note="", create_calendar_invite=True):
     stage = _get_stage_row_by_id(stage_id)
-    if not stage or stage["stage_key"] not in ("audio", "highlights"):
+    if not stage or stage["stage_key"] not in ("audio", "highlights", "design_post"):
         raise ValueError("This stage doesn't use assign-and-notify.")
     output = db.row_to_dict(db.query_one("SELECT * FROM content_outputs WHERE id = ?", (stage["output_id"],)))
     recipient = db.row_to_dict(db.query_one("SELECT * FROM users WHERE id = ?", (recipient_user_id,)))
@@ -816,35 +946,107 @@ def approve_review(stage_id, notes=""):
         (notes, stage_id),
     )
     _complete_stage_tasks(stage["output_id"], stage["stage_key"])
-    if stage["stage_key"] == "review_edit":
-        _maybe_notify_monthly_edit_approved(stage["output_id"])
+    _maybe_finish_pipeline_after_review(stage["output_id"], stage["stage_key"])
     return get_stages_with_status(stage["output_id"])
 
 
-def _maybe_notify_monthly_edit_approved(output_id):
-    """Part 22: 'once the video is approved and downloaded... send the
-    creator a confirmation email such as "Thanks!"'. Only applies to a
-    Monthly pipeline output — Targeted has its own further stages (Audio /
-    Compilation / Highlights) after Review Edit, so it isn't "done" yet the
-    way a Monthly video is the moment its edit is approved."""
+def _maybe_finish_pipeline_after_review(output_id, stage_key):
+    """Decides whether an approved review stage is the END of this output's
+    pipeline (and so should send the finishing 'Thanks!' email) or whether
+    something else still follows:
+
+    - review_edit: finishes Monthly (testimony has nothing after it;
+      podcast_episode/course still have Highlights, but that's a separate
+      hand-off to the same editor, not a blocker on thanking them for the
+      edit itself — matches the pre-Part-23 behavior exactly). Filler-video
+      does NOT finish here — decide_filler_audio's yes/no comes next.
+    - review_audio: finishes Filler-video when the audio decision was
+      "yes" (Targeted Short's review_audio still continues into
+      Compilation, so it deliberately does NOT finish here).
+    - review_design: always finishes Filler-design — it's the last stage.
+    """
     output = db.row_to_dict(db.query_one("SELECT * FROM content_outputs WHERE id = ?", (output_id,)))
-    if not output or not is_monthly_pipeline_eligible(output["content_type_id"]):
+    if not output:
         return
-    task = db.query_one("SELECT assigned_user_id FROM tasks WHERE output_id = ? AND stage_key = 'edit'", (output_id,))
+    ct_key = _content_type_key(output["content_type_id"])
+    if stage_key == "review_edit":
+        if ct_key in MONTHLY_PIPELINE_TYPE_KEYS:
+            _maybe_notify_pipeline_output_approved(output_id, "review_edit")
+    elif stage_key == "review_audio":
+        if ct_key in FILLER_VIDEO_PIPELINE_TYPE_KEYS:
+            _maybe_notify_pipeline_output_approved(output_id, "review_audio")
+    elif stage_key == "review_design":
+        _maybe_notify_pipeline_output_approved(output_id, "review_design")
+
+
+def _maybe_notify_pipeline_output_approved(output_id, source_stage_key):
+    """Part 22/23: 'once the video/design is approved... send the creator a
+    confirmation email such as "Thanks!"'. source_stage_key is the REVIEW
+    stage that just finished things off; REOPENS_STAGE maps it back to the
+    task (edit/audio/design_post) whose assignee actually did the work."""
+    output = db.row_to_dict(db.query_one("SELECT * FROM content_outputs WHERE id = ?", (output_id,)))
+    if not output:
+        return
+    credited_stage_key = REOPENS_STAGE.get(source_stage_key, source_stage_key)
+    task = db.query_one("SELECT assigned_user_id FROM tasks WHERE output_id = ? AND stage_key = ?", (output_id, credited_stage_key))
     if not task or not task["assigned_user_id"]:
         return
-    editor = db.query_one("SELECT name, email FROM users WHERE id = ?", (task["assigned_user_id"],))
-    if not editor or not editor["email"]:
+    assignee = db.query_one("SELECT name, email FROM users WHERE id = ?", (task["assigned_user_id"],))
+    if not assignee or not assignee["email"]:
         return
     campaign = _campaign_title_and_owner(output)
     title = campaign["title"] if campaign else _output_type_label(output)
     try:
         email_integration.send_email(
-            editor["email"], f"Approved: {title}",
-            f"Hi {editor['name']},\n\nYour edit for “{title}” is approved and downloaded. Thanks!\n",
+            assignee["email"], f"Approved: {title}",
+            f"Hi {assignee['name']},\n\nYour work on “{title}” is approved and downloaded. Thanks!\n",
         )
     except (email_integration.EmailNotConfigured, Exception):
         pass
+
+
+def decide_filler_audio(stage_id, wants_audio):
+    """Filler-video's dynamic branch point (Part 23): stage_id is the
+    OUTPUT's review_edit stage, which is where the yes/no decision (and
+    whether it's been made yet) is tracked. 'Yes' inserts fresh audio/
+    review_audio pipeline_stages rows after review_edit and materializes
+    their tasks (see task_engine.generate_tasks_for_campaign's dynamic-stage
+    guard) so Audio picks up right where Targeted Short's does — an explicit
+    assign-and-send action. 'No' finishes the pipeline right here."""
+    stage = _get_stage_row_by_id(stage_id)
+    if not stage or stage["stage_key"] != "review_edit":
+        raise ValueError("This isn't the Review Content stage.")
+    if stage.get("review_decision") != "approved":
+        raise ValueError("Review Content hasn't been approved yet.")
+    if stage.get("audio_decision"):
+        raise ValueError("That decision has already been made.")
+    db.execute(
+        "UPDATE pipeline_stages SET audio_decision = ? WHERE id = ?",
+        ("yes" if wants_audio else "no", stage_id),
+    )
+    output = db.row_to_dict(db.query_one("SELECT * FROM content_outputs WHERE id = ?", (stage["output_id"],)))
+    if wants_audio:
+        existing = db.query_one(
+            "SELECT id FROM pipeline_stages WHERE output_id = ? AND stage_key = 'audio'", (output["id"],)
+        )
+        if not existing:
+            max_row = db.query_one("SELECT MAX(sort_order) AS m FROM pipeline_stages WHERE output_id = ?", (output["id"],))
+            next_sort = (max_row["m"] if max_row and max_row["m"] is not None else 0) + 1
+            db.execute(
+                "INSERT INTO pipeline_stages (output_id, stage_key, sort_order) VALUES (?, 'audio', ?)",
+                (output["id"], next_sort),
+            )
+            db.execute(
+                "INSERT INTO pipeline_stages (output_id, stage_key, sort_order) VALUES (?, 'review_audio', ?)",
+                (output["id"], next_sort + 1),
+            )
+            from . import task_engine
+            task_engine.generate_tasks_for_campaign(output["campaign_id"], only_new_output_type=output["content_type_id"])
+        _log(output["campaign_id"], f"Sending audio to a musician for {_output_type_label(output)}.")
+    else:
+        _maybe_notify_pipeline_output_approved(output["id"], "review_edit")
+        _log(output["campaign_id"], f"No audio needed for {_output_type_label(output)} — pipeline finished.")
+    return get_stages_with_status(output["id"])
 
 
 def reject_review(stage_id, notes):
