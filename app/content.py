@@ -58,23 +58,63 @@ def get_content_type_by_key(key):
 
 def create_campaign_from_rule(rule, publish_date_iso):
     """Called by scheduling.materialize_rule() to turn one occurrence of a
-    rule into a real Campaign (+ its outputs + its tasks)."""
+    rule into a real Campaign (+ its outputs + its tasks). Ideas overhaul
+    (Sept): before falling back to a generic placeholder title, check the
+    Ideas bank for the oldest unscheduled idea tagged with this exact
+    content type — if one exists, use it to fill this slot automatically
+    (title/notes/links) instead of Jodie having to schedule it by hand."""
     ct = get_content_type(rule["content_type_id"])
-    title = rule["default_title"] or ct["label"]
+    idea = _oldest_matching_idea(ct)
+    title = idea["title"] if idea else (rule["default_title"] or ct["label"])
+    notes = idea_notes_with_links(idea) if idea else ""
 
     campaign_id = db.execute(
         """INSERT INTO campaigns
-           (title, publish_date, status, primary_content_type_id,
-            scheduling_rule_id, schedule_origin, created_at, updated_at)
-           VALUES (?, ?, 'planned', ?, ?, 'rule', datetime('now'), datetime('now'))""",
-        (title, publish_date_iso, ct["id"], rule["id"]),
+           (title, notes, publish_date, status, primary_content_type_id,
+            scheduling_rule_id, schedule_origin, source_idea_id, created_at, updated_at)
+           VALUES (?, ?, ?, 'planned', ?, ?, 'rule', ?, datetime('now'), datetime('now'))""",
+        (title, notes, publish_date_iso, ct["id"], rule["id"], idea["id"] if idea else None),
     )
+    if idea:
+        db.execute("UPDATE content_ideas SET scheduled_campaign_id = ? WHERE id = ?", (campaign_id, idea["id"]))
 
     add_output(campaign_id, ct["id"], publish_date_iso)
     task_engine.generate_tasks_for_campaign(campaign_id)
     _spawn_paired_and_followup_content(campaign_id, ct, publish_date_iso)
 
     return campaign_id
+
+
+# Two Filler subtypes are never auto-scheduled by a recurring rule at all —
+# there's nothing to shoot until a specific source clip exists — so they're
+# deliberately left off every scheduling_rule (see scripts/seed.py
+# CONTENT_TYPES). They can only ever reach the calendar via a matching idea
+# that also carries a link to that source video/episode.
+IDEA_REQUIRES_LINK_TYPE_KEYS = ("preaching_teaching", "podcast_additional_highlight")
+
+
+def _oldest_matching_idea(ct):
+    if ct["category_key"] not in ("monthly", "filler"):
+        return None
+    idea = db.row_to_dict(db.query_one(
+        """SELECT * FROM content_ideas WHERE content_type_id = ? AND scheduled_campaign_id IS NULL
+           ORDER BY created_at ASC LIMIT 1""",
+        (ct["id"],),
+    ))
+    if not idea:
+        return None
+    if ct["key"] in IDEA_REQUIRES_LINK_TYPE_KEYS and not (idea["links"] or "").strip():
+        return None
+    return idea
+
+
+def idea_notes_with_links(idea):
+    notes = idea["notes"] or ""
+    links = (idea["links"] or "").strip()
+    if not links:
+        return notes
+    links_block = "Links from the idea:\n" + links
+    return f"{notes}\n\n{links_block}" if notes else links_block
 
 
 def _spawn_paired_and_followup_content(campaign_id, ct, publish_date_iso, actor_id=None):
@@ -124,7 +164,7 @@ def _spawn_targeted_followups(parent_campaign_id, parent_publish_iso, actor_id=N
     followups = (
         (5, "highlight_1", "Highlight/Snippet 1"),
         (9, "highlight_2", "Highlight/Snippet 2"),
-        (11, "targeted_full_repost", "Full Episode — Portrait Repost"),
+        (11, "targeted_full_repost", "Full YouTube — Portrait Repost"),
     )
     for offset, type_key, label in followups:
         ct = get_content_type_by_key(type_key)
@@ -199,16 +239,16 @@ def add_output(campaign_id, content_type_id, publish_date_iso, title=None, platf
 
 
 def create_campaign(*, title, publish_date_iso, content_type_id, platform_ids=None, owner_id=None,
-                     assigned_user_id=None, concept="", created_by=None, source_idea_id=None,
+                     assigned_user_id=None, concept="", notes="", created_by=None, source_idea_id=None,
                      extra_output_type_ids=None):
     """Used by the quick "+ Create Content" flow and the Ideas -> Schedule flow."""
     ct = get_content_type(content_type_id)
     campaign_id = db.execute(
         """INSERT INTO campaigns
-           (title, concept, publish_date, status, owner_id, primary_content_type_id,
+           (title, concept, notes, publish_date, status, owner_id, primary_content_type_id,
             schedule_origin, source_idea_id, created_by, created_at, updated_at)
-           VALUES (?, ?, ?, 'planned', ?, ?, 'manual', ?, ?, datetime('now'), datetime('now'))""",
-        (title, concept, publish_date_iso, owner_id, ct["id"], source_idea_id, created_by),
+           VALUES (?, ?, ?, ?, 'planned', ?, ?, 'manual', ?, ?, datetime('now'), datetime('now'))""",
+        (title, concept, notes, publish_date_iso, owner_id, ct["id"], source_idea_id, created_by),
     )
     add_output(campaign_id, ct["id"], publish_date_iso, platform_ids=platform_ids, assigned_user_id=assigned_user_id)
     for extra_id in (extra_output_type_ids or []):
@@ -336,9 +376,51 @@ def update_campaign_fields(campaign_id, fields):
     allowed = {k: v for k, v in fields.items() if k in CAMPAIGN_TEXT_FIELDS}
     if not allowed:
         return
+    campaign = db.row_to_dict(db.query_one("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)))
     set_clause = ", ".join(f"{k} = ?" for k in allowed)
     params = list(allowed.values()) + [campaign_id]
     db.execute(f"UPDATE campaigns SET {set_clause}, updated_at = datetime('now') WHERE id = ?", params)
+    if "title" in allowed and campaign and campaign.get("source_idea_id"):
+        _maybe_release_idea_back_to_pool(campaign["source_idea_id"], campaign_id, allowed["title"])
+    for field_name, task_name in SCRIPT_FIELD_AUTO_COMPLETE_TASKS.items():
+        if field_name in allowed and (allowed[field_name] or "").strip():
+            _auto_complete_shoot_task(campaign_id, "script", task_name)
+
+
+# Sept redesign ("uploads auto-advance the task, no manual status click"):
+# filling in a script field is itself the deliverable for that task — Jodie
+# shouldn't also have to separately check it off. The checkbox stays too,
+# as a manual fallback (e.g. the outline lives somewhere else entirely).
+SCRIPT_FIELD_AUTO_COMPLETE_TASKS = {
+    "script": "Write script",
+    "script_youtube": "Write YouTube script",
+}
+
+
+def _auto_complete_shoot_task(campaign_id, stage_key, task_name):
+    task = db.row_to_dict(db.query_one(
+        "SELECT * FROM tasks WHERE campaign_id = ? AND output_id IS NULL AND stage_key = ? AND task_name = ?",
+        (campaign_id, stage_key, task_name),
+    ))
+    if not task or task["status"] == "complete":
+        return
+    db.execute("UPDATE tasks SET status = 'complete', updated_at = datetime('now') WHERE id = ?", (task["id"],))
+    pipeline.after_task_status_change(task["id"])
+
+
+def _maybe_release_idea_back_to_pool(idea_id, campaign_id, new_title):
+    """Ideas overhaul (Sept): a campaign that was auto-filled from a
+    matching idea (see _oldest_matching_idea) keeps its source_idea_id as
+    long as Jodie leaves that title alone. The moment she retitles it
+    herself — swapping in different content for the slot — the idea is no
+    longer "used" here: unlink it from this campaign and drop it back into
+    the unscheduled pool so a later slot can pick it up automatically
+    instead of it being silently lost."""
+    idea = db.row_to_dict(db.query_one("SELECT * FROM content_ideas WHERE id = ?", (idea_id,)))
+    if not idea or idea["title"] == new_title:
+        return
+    db.execute("UPDATE campaigns SET source_idea_id = NULL WHERE id = ?", (campaign_id,))
+    db.execute("UPDATE content_ideas SET scheduled_campaign_id = NULL WHERE id = ?", (idea_id,))
 
 
 def delete_campaign(campaign_id):

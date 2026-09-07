@@ -99,6 +99,8 @@ CREATE TABLE IF NOT EXISTS content_ideas (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     title           TEXT NOT NULL,
     notes           TEXT NOT NULL DEFAULT '',
+    links           TEXT NOT NULL DEFAULT '',           -- newline-separated URLs
+    content_type_id INTEGER REFERENCES content_types(id),-- the specific type Jodie tagged it as (nullable = untyped)
     created_by      INTEGER REFERENCES users(id),
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     scheduled_campaign_id INTEGER REFERENCES campaigns(id) ON DELETE SET NULL -- set once converted

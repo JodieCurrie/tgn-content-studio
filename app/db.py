@@ -82,6 +82,8 @@ _COLUMN_MIGRATIONS = [
     ("campaigns", "drive_folder_id", "TEXT"),
     ("campaigns", "drive_folder_link", "TEXT"),
     ("campaigns", "script_youtube", "TEXT NOT NULL DEFAULT ''"),
+    ("content_ideas", "content_type_id", "INTEGER REFERENCES content_types(id)"),
+    ("content_ideas", "links", "TEXT NOT NULL DEFAULT ''"),
 ]
 
 

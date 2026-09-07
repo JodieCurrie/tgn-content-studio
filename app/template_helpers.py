@@ -51,3 +51,14 @@ def register(app):
     @app.template_filter("status_label")
     def status_label(value):
         return (value or "").replace("_", " ").title()
+
+    @app.template_filter("stage_label")
+    def stage_label(stage_key):
+        """Human label for a pipeline stage_key (Tasks tab, Sept redesign) —
+        falls back to a title-cased version of the key itself if it's ever
+        somehow not in STAGE_BY_KEY."""
+        from . import pipeline
+        entry = pipeline.STAGE_BY_KEY.get(stage_key)
+        if entry:
+            return entry["label"]
+        return (stage_key or "").replace("_", " ").title()

@@ -155,7 +155,7 @@ PIPELINE_CONTENT_TYPE_KEYS = ("targeted_short", "targeted_long")
 # staged pipeline when that task gets reassigned away from her (see
 # after_task_reassignment), which replaced the old explicit "Start
 # production workflow" button for both Monthly and Filler.
-MONTHLY_PIPELINE_TYPE_KEYS = ("podcast_episode", "testimony", "course")
+MONTHLY_PIPELINE_TYPE_KEYS = ("podcast_episode", "testimony", "course", "bible_study")
 FILLER_VIDEO_PIPELINE_TYPE_KEYS = ("tiktok_style", "interview", "preaching_teaching")
 FILLER_DESIGN_PIPELINE_TYPE_KEYS = ("carousel", "normal_post", "moving_scripture", "quick_reel", "scripture_expansion")
 FILLER_PIPELINE_TYPE_KEYS = FILLER_VIDEO_PIPELINE_TYPE_KEYS + FILLER_DESIGN_PIPELINE_TYPE_KEYS
@@ -277,19 +277,37 @@ def start_output_pipeline(output_id, actor_id=None):
 
 
 def after_task_reassignment(task_id, previous_assigned_user_id):
-    """Part 23: reassigning an opt-in type's single default 'Create X' task
-    away from whoever held it is now what starts the staged pipeline, for
-    both Monthly and Filler — replacing the old explicit 'Start production
-    workflow' button. Called from PATCH /api/tasks/<id> with the task's
-    assignee BEFORE the update was applied. No-ops for anything that isn't
-    exactly this situation: a non-pipeline task, a stage-tagged task
-    (already inside a running pipeline), a reassignment back to the same
-    person, a non-opt-in-eligible type, or an output whose pipeline is
-    already running."""
+    """Part 23 (tightened per Jodie's Sept feedback): handing an opt-in
+    type's single default 'Create X' task off to a production collaborator
+    is what starts the staged pipeline, for both Monthly and Filler —
+    replacing the old explicit 'Start production workflow' button. "Handing
+    off" specifically means the task's new assignee is a non-admin
+    (production/editor/music/member) — i.e. someone other than Jodie/another
+    admin doing it themselves. Picking yourself (or another admin) for the
+    first time, clearing the assignee back to nobody, or any no-op
+    reassignment must all stay a single flat task with zero extra clicking;
+    only a genuine hand-off to a collaborator should bring in the rest of
+    the pipeline. Called from PATCH /api/tasks/<id> with the task's assignee
+    BEFORE the update was applied. No-ops for anything that isn't exactly
+    this situation: a non-pipeline task, a stage-tagged task (already inside
+    a running pipeline), a reassignment back to the same person, a
+    non-opt-in-eligible type, or an output whose pipeline is already
+    running."""
     task = db.row_to_dict(db.query_one("SELECT * FROM tasks WHERE id = ?", (task_id,)))
     if not task or not task["output_id"] or task["stage_key"]:
         return
     if task["assigned_user_id"] == previous_assigned_user_id:
+        return
+    if not task["assigned_user_id"]:
+        # Cleared back to unassigned — not a hand-off to anyone.
+        return
+    new_assignee = db.query_one(
+        "SELECT r.is_admin FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?",
+        (task["assigned_user_id"],),
+    )
+    if not new_assignee or new_assignee["is_admin"]:
+        # Assigned to Jodie (or another admin) doing it themselves — still
+        # just one task, no pipeline.
         return
     output = db.row_to_dict(db.query_one("SELECT * FROM content_outputs WHERE id = ?", (task["output_id"],)))
     if not output or not is_opt_in_pipeline_eligible(output["content_type_id"]):
