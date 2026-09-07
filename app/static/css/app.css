@@ -133,6 +133,23 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); }
 .legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
 
+/* Grouped, click-to-expand color key (Calendar page) — each category is a
+   native <details> pill so "click Filler to see its colours" needs no JS. */
+.legend-grouped { align-items: flex-start; }
+.legend-group {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 4px 10px;
+}
+.legend-group summary {
+  cursor: pointer; font-size: 12.5px; font-weight: 600; list-style: none;
+  display: flex; align-items: center; gap: 4px; user-select: none;
+}
+.legend-group summary::-webkit-details-marker { display: none; }
+.legend-group summary::before { content: "▸"; font-size: 10px; color: var(--text-muted); transition: transform 0.15s; }
+.legend-group[open] summary::before { transform: rotate(90deg); }
+.legend-group-count { font-weight: 400; color: var(--text-muted); }
+.legend-group-items { display: flex; flex-wrap: wrap; gap: 8px 14px; padding: 8px 2px 4px; }
+
 /* ---------------------------------------------------------------- calendar */
 .calendar-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
 .calendar-toolbar .month-label { font-size: 18px; font-weight: 700; min-width: 170px; }
