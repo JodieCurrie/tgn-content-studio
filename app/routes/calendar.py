@@ -165,9 +165,10 @@ def month_view():
     meetings_by_day = _meetings_by_day(weeks[0][0], weeks[-1][-1])
     next_from = weeks[-1][0] + timedelta(days=7)
 
-    legend = db.rows_to_list(
-        db.query("SELECT key, label, color FROM content_types WHERE archived = 0 ORDER BY sort_order")
+    legend_types = db.rows_to_list(
+        db.query("SELECT key, label, color, category_key FROM content_types WHERE archived = 0 ORDER BY sort_order")
     )
+    legend_groups = content_module.group_content_types_by_category(legend_types)
 
     return render_template(
         "calendar_month.html",
@@ -176,7 +177,7 @@ def month_view():
         next_from=next_from.isoformat(),
         cont_year=segments[-1]["year"], cont_month=segments[-1]["month"],
         weekday_headers=WEEKDAY_HEADERS,
-        legend=legend,
+        legend_groups=legend_groups,
     )
 
 

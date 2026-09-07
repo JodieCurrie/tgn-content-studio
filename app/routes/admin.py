@@ -7,6 +7,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from .. import db
 from ..auth import login_required, admin_required
 from .. import google_integration
+from .. import content as content_module
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -57,7 +58,8 @@ def content_types():
     platforms = db.rows_to_list(db.query("SELECT * FROM platforms ORDER BY sort_order"))
     for t in types:
         t["default_platform_ids"] = db.from_json(t["default_platform_ids"], [])
-    return render_template("admin/content_types.html", types=types, platforms=platforms)
+    groups = content_module.group_content_types_by_category(types)
+    return render_template("admin/content_types.html", types=types, platforms=platforms, groups=groups)
 
 
 @bp.route("/content-types/new", methods=["POST"])
