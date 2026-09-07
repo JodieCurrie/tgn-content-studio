@@ -11,6 +11,43 @@ from . import scheduling
 from . import pipeline
 
 
+# Fixed display order/labels/icons for the 4 content-type categories (Part
+# 7/8/9's category restructuring) — shared by Admin > Content Types (grouped
+# table) and the Calendar page's color key (grouped, click-to-expand legend),
+# so both group and order categories the same way instead of each guessing.
+CONTENT_TYPE_CATEGORIES = [
+    ("targeted", "Targeted", "🎯"),
+    ("filler", "Filler", "🧩"),
+    ("monthly", "Monthly", "📅"),
+    ("custom", "Custom", "✨"),
+]
+
+
+def group_content_types_by_category(types):
+    """types: a list of dicts each having a 'category_key'. Returns an
+    ordered list of {key, label, icon, types} groups (skipping any category
+    with zero members), in CONTENT_TYPE_CATEGORIES order — any type whose
+    category_key doesn't match one of the 4 known categories falls into a
+    trailing 'Other' group rather than silently vanishing.
+
+    Deliberately named 'types', not 'items': Jinja's dot-access on a dict
+    falls back to a real attribute/method before the dict key, so a group
+    dict with an 'items' key would render dict.items (a bound method)
+    instead of the list whenever a template used group.items."""
+    by_key = {}
+    for t in types:
+        by_key.setdefault(t.get("category_key"), []).append(t)
+    groups = []
+    for key, label, icon in CONTENT_TYPE_CATEGORIES:
+        members = by_key.pop(key, [])
+        if members:
+            groups.append({"key": key, "label": label, "icon": icon, "types": members})
+    for key, members in by_key.items():
+        if members:
+            groups.append({"key": key or "other", "label": (key or "Other").capitalize(), "icon": "📁", "types": members})
+    return groups
+
+
 def get_content_type(content_type_id):
     return db.row_to_dict(db.query_one("SELECT * FROM content_types WHERE id = ?", (content_type_id,)))
 
