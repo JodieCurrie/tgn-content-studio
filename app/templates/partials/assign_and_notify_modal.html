@@ -1,11 +1,15 @@
 <div class="modal-header">
-  <strong style="font-size:16px;">🎵 Assign &amp; send — Audio Creation</strong>
+  <strong style="font-size:16px;">{{ '🎵' if stage.stage_key == 'audio' else '🎨' }} Assign &amp; send — {{ stage_label or 'Audio Creation' }}</strong>
   <button class="panel-close" id="modal-close-btn" style="position:static;">✕</button>
 </div>
 <div class="modal-body">
+  {% if stage.stage_key == 'audio' %}
   <div class="page-subtitle" style="margin-bottom:10px;">{{ stage.campaign_title }} — the edit is approved. Who's adding the audio?</div>
+  {% else %}
+  <div class="page-subtitle" style="margin-bottom:10px;">{{ stage.campaign_title }} — the concept's ready. Who's designing this?</div>
+  {% endif %}
   <form id="assign-notify-form" data-stage-id="{{ stage.id }}">
-    <label class="field-label">Musician</label>
+    <label class="field-label">{{ 'Musician' if stage.stage_key == 'audio' else 'Designer' }}</label>
     <select class="field-select" name="recipient_user_id" id="an-recipient" required style="margin-bottom:14px;">
       <option value="">Choose someone...</option>
       {% for u in users %}

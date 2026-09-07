@@ -3,7 +3,10 @@
   <button class="panel-close" id="modal-close-btn" style="position:static;">✕</button>
 </div>
 <div class="modal-body">
-  <div class="page-subtitle" style="margin-bottom:10px;">{{ stage.campaign_title }} — Film/Record confirmed. This assigns Edit on BOTH outputs (Short and YouTube) to the same editor.</div>
+  <div class="page-subtitle" style="margin-bottom:10px;">
+    {{ stage.campaign_title }} — Film/Record confirmed.
+    {% if stage.campaign_id %}This assigns Edit on BOTH outputs (Short and YouTube) to the same editor.{% else %}This assigns Edit to the editor you pick.{% endif %}
+  </div>
   <form id="video-delivery-form" data-stage-id="{{ stage.id }}">
     <label class="field-label">Editor</label>
     <select class="field-select" name="recipient_user_id" id="vd-recipient" required style="margin-bottom:14px;">

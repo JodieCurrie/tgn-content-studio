@@ -121,16 +121,13 @@
         {% if o.assigned_name %}<span class="page-subtitle">Assigned: {{ o.assigned_name }}</span>{% endif %}
       </div>
 
-      {% if o.can_start_pipeline %}
-      {# Part 21: Monthly Campaign types (Podcast Episode/Testimony/Course)
-         keep their plain flat checklist below by default — this switches
-         just THIS campaign over to the staged Develop Concept -> Film/
-         Record -> Edit -> Review Edit -> [Select Highlight Reels] pipeline,
-         the same shape Targeted Video always uses. #}
-      <div style="margin-top:10px; border-top:1px solid var(--border); padding-top:8px;">
-        <button type="button" class="btn btn-sm btn-outline js-start-pipeline" data-output-id="{{ o.id }}">🎬 Start production workflow</button>
-        <div class="page-subtitle" style="margin-top:4px;">Switches this to the staged Develop Concept → Film/Record → Edit → Review → Highlights pipeline, with meeting scheduling and hand-off emails — for when you're delegating this one rather than making it yourself.</div>
-      </div>
+      {% if not o.pipeline_stages and o.is_opt_in_eligible %}
+      {# Part 23: an opt-in type (Monthly's podcast_episode/testimony/course,
+         or one of Filler's 8 video/design subtypes) starts on a plain "Create
+         X" task assigned to Jodie — reassigning that task to someone else is
+         what switches this specific output over to the staged pipeline (no
+         button needed any more). #}
+      <div class="page-subtitle" style="margin-top:6px;">Reassign the "Create…" task below to someone else to start the staged production workflow for this one.</div>
       {% endif %}
 
       {% if o.pipeline_stages %}
@@ -164,8 +161,11 @@
             <div class="page-subtitle" style="padding-left:18px;">Edit assigned to {{ stage.recipient_name }}, due {{ stage.delivery_deadline|friendly_date }}{% if not stage.delivery_email_sent_at %} — email wasn't sent, let them know directly{% endif %}.</div>
             {% endif %}
             {% elif stage.needs_scheduling %}
-            <div style="padding-left:18px; margin-top:2px;">
-              <button type="button" class="btn btn-sm btn-outline js-schedule-meeting" data-campaign-id="{{ c.id }}" data-stage-key="{{ stage.stage_key }}">📅 Schedule this meeting</button>
+            <div style="padding-left:18px; margin-top:2px; display:flex; gap:6px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-sm btn-outline js-schedule-meeting" data-campaign-id="{{ c.id }}" data-stage-key="{{ stage.stage_key }}" data-output-id="{{ o.id }}">📅 Schedule this meeting</button>
+              {% if stage.is_filler_video_film %}
+              <button type="button" class="btn btn-sm btn-ghost js-already-recorded" data-stage-id="{{ stage.id }}">✅ Already recorded</button>
+              {% endif %}
             </div>
             {% elif stage.needs_confirmation %}
             <div style="padding-left:18px; margin-top:2px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
@@ -185,6 +185,13 @@
           {% elif stage.is_review_stage and stage.unlocked %}
             {% if stage.status == 'complete' %}
             <div class="page-subtitle" style="padding-left:18px;">✅ Approved{% if stage.review_notes %} — {{ stage.review_notes }}{% endif %}</div>
+            {% if stage.needs_audio_decision %}
+            <div style="padding-left:18px; margin-top:4px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <span class="page-subtitle">Send this to a musician for audio?</span>
+              <button type="button" class="btn btn-sm btn-outline js-decide-audio" data-stage-id="{{ stage.id }}" data-wants-audio="1">🎵 Yes</button>
+              <button type="button" class="btn btn-sm btn-ghost js-decide-audio" data-stage-id="{{ stage.id }}" data-wants-audio="0">No — finish up</button>
+            </div>
+            {% endif %}
             {% else %}
             <div style="padding-left:18px; margin-top:2px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
               {% if stage.review_decision == 'rejected' %}<span class="page-subtitle">🔁 Changes requested — waiting on resubmission</span>{% else %}<span class="page-subtitle">⏳ Awaiting your review</span>{% endif %}
@@ -192,10 +199,10 @@
             </div>
             {% endif %}
 
-          {% elif stage.stage_key == 'audio' and stage.unlocked %}
+          {% elif stage.stage_key in ('audio', 'design_post') and stage.unlocked %}
             {% if stage.needs_assignment %}
             <div style="padding-left:18px; margin-top:2px;">
-              <button type="button" class="btn btn-sm btn-outline js-open-assign" data-stage-id="{{ stage.id }}">🎵 Assign &amp; send</button>
+              <button type="button" class="btn btn-sm btn-outline js-open-assign" data-stage-id="{{ stage.id }}">{{ '🎵 Assign & send' if stage.stage_key == 'audio' else '🎨 Assign & send' }}</button>
             </div>
             {% else %}
             {% for t in stage.tasks %}

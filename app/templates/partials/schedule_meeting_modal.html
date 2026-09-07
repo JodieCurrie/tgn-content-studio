@@ -3,7 +3,7 @@
   <button class="panel-close" id="modal-close-btn" style="position:static;">✕</button>
 </div>
 <div class="modal-body">
-  <div class="page-subtitle" style="margin-bottom:10px;">{{ campaign.title }} — one shoot, shared by Short &amp; YouTube.</div>
+  <div class="page-subtitle" style="margin-bottom:10px;">{{ campaign.title }}{% if stage.campaign_id %} — one shoot, shared by Short &amp; YouTube.{% endif %}</div>
   <form id="schedule-meeting-form" data-campaign-id="{{ campaign.id }}" data-stage-key="{{ stage_key }}">
     <div class="form-grid" style="margin-bottom:6px;">
       <div>
@@ -25,6 +25,17 @@
       <label class="checkbox-row"><input type="checkbox" name="participant_ids" value="{{ u.id }}" {{ 'checked' if u.id in participant_ids }}> {{ u.name }}</label>
       {% endfor %}
     </div>
+
+    {% if bunch_candidates %}
+    <label class="field-label">Bunch with other unscheduled filming sessions?</label>
+    <div id="sm-bunch" style="display:flex; flex-direction:column; gap:6px; margin-bottom:14px;">
+      {% for cand in bunch_candidates %}
+      <label class="checkbox-row"><input type="checkbox" name="bunch_with_stage_ids" value="{{ cand.stage_id }}">
+        {{ cand.campaign_title }} <span class="page-subtitle">({{ cand.type_label }} · {{ cand.publish_date|friendly_date }})</span>
+      </label>
+      {% endfor %}
+    </div>
+    {% endif %}
 
     <div id="sm-error" class="flash error" style="display:none;"></div>
     <button class="btn btn-primary" type="submit" style="width:100%; justify-content:center;">Save meeting</button>
