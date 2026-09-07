@@ -352,19 +352,31 @@ def campaign_panel(campaign_id):
     )
 
 
-# ---------------------------------------------------------------------- pipeline: shoot-level modals (campaign-scoped)
+# ---------------------------------------------------------------------- pipeline: meeting-stage modals (campaign-scoped for Targeted's shared shoot, output-scoped for a Monthly pipeline's own "film" — see app/pipeline.py PRODUCTION_STAGES_BY_TYPE)
+def _meeting_stage_for_campaign(campaign_id, stage_key):
+    """Resolves a meeting stage's row whichever way it's scoped: Targeted's
+    shared concept/film live on the campaign itself; a Monthly pipeline has
+    no shared shoot tier, so its own "film" lives on its single output."""
+    return db.row_to_dict(
+        db.query_one(
+            """SELECT * FROM pipeline_stages WHERE stage_key = ? AND (
+                   campaign_id = ?
+                   OR output_id IN (SELECT id FROM content_outputs WHERE campaign_id = ?)
+               )""",
+            (stage_key, campaign_id, campaign_id),
+        )
+    )
+
+
 @bp.route("/campaigns/<int:campaign_id>/pipeline/<stage_key>/schedule-modal")
 @login_required
 def pipeline_schedule_modal(campaign_id, stage_key):
     """Fragment for the 'Schedule this meeting' modal — also reused, with
-    the stage's current values pre-filled, for a reschedule. Concept/Film
-    are shared once per shoot, so this is campaign-scoped, not per-output."""
+    the stage's current values pre-filled, for a reschedule."""
     if stage_key not in pipeline.MEETING_STAGE_KEYS:
         return "<div class='panel-empty'>Not found.</div>", 404
     campaign = db.row_to_dict(db.query_one("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)))
-    stage = db.row_to_dict(
-        db.query_one("SELECT * FROM pipeline_stages WHERE campaign_id = ? AND stage_key = ?", (campaign_id, stage_key))
-    )
+    stage = _meeting_stage_for_campaign(campaign_id, stage_key)
     if not campaign or not stage:
         return "<div class='panel-empty'>Not found.</div>", 404
     users = db.rows_to_list(db.query("SELECT id, name FROM users WHERE active = 1 ORDER BY name"))
@@ -385,8 +397,12 @@ def pipeline_confirm_modal(stage_id):
     pending confirmation, and reusable on demand from the panel too."""
     stage = db.row_to_dict(
         db.query_one(
-            """SELECT ps.*, c.title AS campaign_title FROM pipeline_stages ps
-               JOIN campaigns c ON c.id = ps.campaign_id WHERE ps.id = ?""",
+            """SELECT ps.*, COALESCE(c1.title, c2.title) AS campaign_title
+               FROM pipeline_stages ps
+               LEFT JOIN campaigns c1 ON c1.id = ps.campaign_id
+               LEFT JOIN content_outputs o ON o.id = ps.output_id
+               LEFT JOIN campaigns c2 ON c2.id = o.campaign_id
+               WHERE ps.id = ?""",
             (stage_id,),
         )
     )
@@ -403,18 +419,33 @@ def pipeline_confirm_modal(stage_id):
 def pipeline_delivery_modal(stage_id):
     """Fragment for the editor hand-off form shown right after confirming
     Film/Record happened — recipient is a real user now, picked from a
-    dropdown rather than typed in as free text."""
+    dropdown rather than typed in as free text. For a Monthly pipeline's
+    output-scoped "film" (no sibling outputs to hand off at once), the
+    deadline field is pre-filled with a ~10-day-out suggestion (Part 21);
+    Targeted's shared shoot leaves it blank, as before."""
     stage = db.row_to_dict(
         db.query_one(
-            """SELECT ps.*, c.title AS campaign_title FROM pipeline_stages ps
-               JOIN campaigns c ON c.id = ps.campaign_id WHERE ps.id = ?""",
+            """SELECT ps.*, COALESCE(c1.title, c2.title) AS campaign_title, o.publish_date AS output_publish_date
+               FROM pipeline_stages ps
+               LEFT JOIN campaigns c1 ON c1.id = ps.campaign_id
+               LEFT JOIN content_outputs o ON o.id = ps.output_id
+               LEFT JOIN campaigns c2 ON c2.id = o.campaign_id
+               WHERE ps.id = ?""",
             (stage_id,),
         )
     )
     if not stage or stage["stage_key"] != "film":
         return "<div class='panel-empty'>Not found.</div>", 404
     users = db.rows_to_list(db.query("SELECT id, name FROM users WHERE active = 1 ORDER BY name"))
-    return render_template("partials/video_delivery_modal.html", stage=stage, users=users)
+    default_deadline = None
+    if stage.get("output_id"):
+        suggested = date.today() + timedelta(days=10)
+        if stage.get("output_publish_date"):
+            suggested = min(suggested, date.fromisoformat(stage["output_publish_date"]) - timedelta(days=1))
+        default_deadline = suggested.isoformat()
+    return render_template(
+        "partials/video_delivery_modal.html", stage=stage, users=users, default_deadline=default_deadline,
+    )
 
 
 # ---------------------------------------------------------------------- pipeline: production-level modals (output-scoped)

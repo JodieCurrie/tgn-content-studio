@@ -371,6 +371,22 @@ def mark_pipeline_stage_received(stage_id):
     return jsonify({"ok": True})
 
 
+@bp.route("/outputs/<int:output_id>/start-pipeline", methods=["POST"])
+@login_required
+def start_output_pipeline(output_id):
+    """Part 21's opt-in trigger: switches ONE Monthly Campaign output from
+    its plain flat checklist over to the staged Develop Concept -> Film/
+    Record -> Edit -> Review Edit -> [Select Highlight Reels] pipeline."""
+    forbidden = _admin_only()
+    if forbidden:
+        return forbidden
+    try:
+        pipeline.start_output_pipeline(output_id, actor_id=g.user["id"])
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
 @bp.route("/pipeline-stages/<int:stage_id>/capture-highlights", methods=["POST"])
 @login_required
 def capture_pipeline_highlights(stage_id):
