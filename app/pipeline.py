@@ -81,11 +81,27 @@ SUBMISSION_STAGE_KEYS = ("compilation", "highlights")
 PRODUCTION_STAGES_BY_TYPE = {
     "targeted_short": ["edit", "review_edit", "audio", "review_audio", "compilation"],
     "targeted_long": ["edit", "review_edit", "highlights"],
+    # Monthly Campaign pipeline (opt-in, Part 21-22): unlike Targeted Video,
+    # this is a single-output pipeline — no shared "shoot" tier, since a
+    # Monthly campaign only ever has one output. Every stage row here lives
+    # at the PRODUCTION tier (output_id set, campaign_id NULL) even though
+    # "develop_concept"/"film" are shoot-like in what they do — there's no
+    # sibling output to share them with, so there's nothing to gain from a
+    # second tier. Opt-in per campaign via start_output_pipeline() — the
+    # content type keeps its plain flat task list by default (see
+    # MONTHLY_PIPELINE_TYPE_KEYS / task_engine.py).
+    "podcast_episode": ["develop_concept", "film", "edit", "review_edit", "highlights"],
+    "testimony": ["develop_concept", "film", "edit", "review_edit"],
+    "course": ["develop_concept", "film", "edit", "review_edit", "highlights"],
 }
 
 STAGE_BY_KEY = {
     "script": {"key": "script", "label": "Script Development"},
     "concept": {"key": "concept", "label": "Concept Hashout", "is_meeting": True, "meet": True},
+    # Monthly's first stage (Part 21) — a plain task like Script Development
+    # was for Targeted, not a meeting; "Concept Hashout" above stays
+    # Targeted-only, unchanged.
+    "develop_concept": {"key": "develop_concept", "label": "Develop Concept"},
     "film": {"key": "film", "label": "Film/Record", "is_meeting": True, "meet": False},
     "edit": {"key": "edit", "label": "Edit"},
     "review_edit": {"key": "review_edit", "label": "Review Edit"},
@@ -95,9 +111,30 @@ STAGE_BY_KEY = {
     "highlights": {"key": "highlights", "label": "Select Highlight Reels"},
 }
 
-# The two output types this pipeline applies to — every other content type
-# keeps its plain flat task list, untouched.
+# The two output types the ALWAYS-ON Targeted Video pipeline applies to —
+# every other content type keeps its plain flat task list unless/until it
+# opts into its own pipeline (see MONTHLY_PIPELINE_TYPE_KEYS below).
 PIPELINE_CONTENT_TYPE_KEYS = ("targeted_short", "targeted_long")
+
+# Monthly Campaign types that CAN opt into a staged production pipeline
+# (Part 21), on a per-campaign basis, via start_output_pipeline() — unlike
+# PIPELINE_CONTENT_TYPE_KEYS above, a campaign of one of these types starts
+# out on the plain flat checklist and only switches over when an admin
+# clicks "Start production workflow" on that specific campaign (Jodie: most
+# Monthly content she still makes herself, so she didn't want the full
+# back-and-forth forced on everything of this type).
+MONTHLY_PIPELINE_TYPE_KEYS = ("podcast_episode", "testimony", "course")
+
+# Which follow-up content type a monthly pipeline's delivered highlight
+# clips get fed into once "Mark as received" fires (mirrors Targeted's
+# highlight_1/highlight_2, see _feed_highlight_clips_into_followups) — keyed
+# by the PRIMARY type, since that's what mark_highlights_received has on
+# hand. Testimony has no highlight follow-up type at all, so it's absent
+# here (and has no "highlights" stage to begin with).
+MONTHLY_HIGHLIGHT_FOLLOWUP_TYPE = {
+    "podcast_episode": "podcast_highlight",
+    "course": "course_highlight",
+}
 
 # Google Calendar colorId for pipeline meetings/deadlines — "8" is Google's
 # "Graphite" (a neutral grey), visually distinct from the light-grey
@@ -108,6 +145,11 @@ MEETING_CALENDAR_COLOR_ID = "8"
 def is_pipeline_content_type_id(content_type_id):
     row = db.query_one("SELECT key FROM content_types WHERE id = ?", (content_type_id,))
     return bool(row) and row["key"] in PIPELINE_CONTENT_TYPE_KEYS
+
+
+def is_monthly_pipeline_eligible(content_type_id):
+    row = db.query_one("SELECT key FROM content_types WHERE id = ?", (content_type_id,))
+    return bool(row) and row["key"] in MONTHLY_PIPELINE_TYPE_KEYS
 
 
 def _content_type_key(content_type_id):
@@ -147,6 +189,50 @@ def _ensure_shoot_stages(campaign_id):
             "INSERT INTO pipeline_stages (campaign_id, stage_key, sort_order) VALUES (?, ?, ?)",
             (campaign_id, stage_key, i),
         )
+
+
+def start_output_pipeline(output_id, actor_id=None):
+    """The opt-in trigger for a Monthly Campaign (Part 21): switches ONE
+    campaign's output from its plain flat checklist over to the staged
+    Develop Concept -> Film/Record -> Edit -> Review Edit -> [Select
+    Highlight Reels] pipeline. Safe to call only once per output — raises if
+    the type isn't eligible or the pipeline's already running. Clears out
+    whichever flat checklist tasks nobody has touched yet (same
+    not_started-only safety rule used when Targeted's pipeline first
+    replaced its own flat list — see scripts/seed.py
+    _migrate_targeted_video_pipeline) and lays down the new stage rows +
+    tasks in their place."""
+    output = db.row_to_dict(db.query_one("SELECT * FROM content_outputs WHERE id = ?", (output_id,)))
+    if not output:
+        raise ValueError("No such content output.")
+    if not is_monthly_pipeline_eligible(output["content_type_id"]):
+        raise ValueError("This content type doesn't have an opt-in production pipeline.")
+    if db.query_one("SELECT id FROM pipeline_stages WHERE output_id = ? LIMIT 1", (output_id,)):
+        raise ValueError("The production workflow is already running for this content.")
+
+    ct_key = _content_type_key(output["content_type_id"])
+    stage_keys = PRODUCTION_STAGES_BY_TYPE.get(ct_key, [])
+    for i, stage_key in enumerate(stage_keys):
+        db.execute(
+            "INSERT INTO pipeline_stages (output_id, stage_key, sort_order) VALUES (?, ?, ?)",
+            (output_id, stage_key, i),
+        )
+
+    stale = db.rows_to_list(
+        db.query(
+            """SELECT id FROM tasks WHERE output_id = ? AND created_from_template = 1
+               AND status = 'not_started' AND stage_key IS NULL""",
+            (output_id,),
+        )
+    )
+    for t in stale:
+        db.execute("DELETE FROM tasks WHERE id = ?", (t["id"],))
+
+    from . import task_engine
+    task_engine.generate_tasks_for_campaign(output["campaign_id"], only_new_output_type=output["content_type_id"])
+
+    _log(output["campaign_id"], f"Started the staged production workflow for {_output_type_label(output)}.")
+    return get_stages_with_status(output_id)
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +301,11 @@ def get_stages_with_status(output_id):
     if not output:
         return []
     shoot = get_shoot_stages_with_status(output["campaign_id"])
-    shoot_complete = bool(shoot) and shoot[-1]["status"] == "complete"
+    # A content type with no shared shoot tier at all (e.g. a Monthly
+    # pipeline output, which has none) has nothing upstream to wait on, so
+    # its first production stage unlocks immediately — only a REAL shoot
+    # tier (Targeted) has to actually finish first.
+    shoot_complete = (not shoot) or shoot[-1]["status"] == "complete"
 
     rows = db.rows_to_list(
         db.query("SELECT * FROM pipeline_stages WHERE output_id = ? ORDER BY sort_order", (output_id,))
@@ -229,6 +319,7 @@ def get_stages_with_status(output_id):
     for t in all_tasks:
         tasks_by_stage.setdefault(t["stage_key"], []).append(t)
 
+    now_iso = datetime.utcnow().isoformat()
     result = []
     previous_complete = shoot_complete
     for row in rows:
@@ -236,6 +327,8 @@ def get_stages_with_status(output_id):
         tasks = tasks_by_stage.get(stage_key, [])
         status = _derive_status(tasks)
         unlocked = previous_complete
+        is_meeting_stage = stage_key in MEETING_STAGE_KEYS
+        participant_ids = db.from_json(row.get("participant_user_ids"), [])
         entry = {
             **row,
             "label": STAGE_BY_KEY[stage_key]["label"],
@@ -244,7 +337,21 @@ def get_stages_with_status(output_id):
             "tasks": tasks,
             "is_review_stage": stage_key in REVIEW_STAGE_KEYS,
             "is_submission_stage": stage_key in SUBMISSION_STAGE_KEYS,
+            "is_meeting_stage": is_meeting_stage,
+            "participant_ids": participant_ids,
+            "participant_names": names_for_user_ids(participant_ids),
         }
+        if is_meeting_stage:
+            # Only Monthly's per-output "film" stage reaches this branch —
+            # Targeted's concept/film live on the shared shoot tier above
+            # and are annotated by get_shoot_stages_with_status instead.
+            has_meeting = bool(row.get("meeting_start"))
+            confirmed = bool(row.get("meeting_confirmed_at"))
+            meeting_passed = bool(row.get("meeting_end")) and row["meeting_end"] < now_iso
+            entry["needs_scheduling"] = unlocked and status != "complete" and not has_meeting
+            entry["needs_confirmation"] = unlocked and has_meeting and meeting_passed and not confirmed
+            entry["scheduled_upcoming"] = unlocked and has_meeting and not meeting_passed and not confirmed and status != "complete"
+            entry["recipient_name"] = _name_for_user_id(row.get("delivery_recipient_user_id"))
         if stage_key in REVIEW_STAGE_KEYS:
             entry["needs_review"] = unlocked and status != "complete"
         if stage_key == "audio":
@@ -353,6 +460,42 @@ def _on_stage_unlocked(stage_row):
     db.execute("UPDATE pipeline_stages SET activated_at = datetime('now') WHERE id = ?", (stage_row["id"],))
     if stage_row["stage_key"] == "compilation":
         _notify_compilation_ready(stage_row)
+    elif stage_row["stage_key"] in REVIEW_STAGE_KEYS:
+        _notify_review_ready(stage_row)
+    elif stage_row["stage_key"] == "film" and stage_row.get("output_id"):
+        # Monthly pipeline outputs have no shared "concept" stage to create
+        # the shoot's Drive folder the way Targeted's does — Film/Record
+        # unlocking (i.e. Develop Concept just finished) is this pipeline's
+        # equivalent moment.
+        output = db.row_to_dict(db.query_one("SELECT campaign_id FROM content_outputs WHERE id = ?", (stage_row["output_id"],)))
+        campaign = db.row_to_dict(db.query_one("SELECT * FROM campaigns WHERE id = ?", (output["campaign_id"],))) if output else None
+        if campaign and not campaign.get("drive_folder_id"):
+            _create_drive_folder_for_campaign(campaign)
+
+
+def _notify_review_ready(stage_row):
+    """Section 14/17's "send me an email with a link to the task" — fires
+    the moment a Review Edit/Review Audio stage unlocks, for every admin
+    (not just whoever happens to be logged in). Previously only Final
+    Compilation's unlock sent a heads-up email; reviews unlocked silently."""
+    output = db.row_to_dict(db.query_one("SELECT * FROM content_outputs WHERE id = ?", (stage_row["output_id"],)))
+    if not output:
+        return
+    campaign = _campaign_title_and_owner(output)
+    title = campaign["title"] if campaign else _output_type_label(output)
+    label = STAGE_BY_KEY[stage_row["stage_key"]]["label"]
+    admins = db.rows_to_list(
+        db.query(
+            "SELECT u.email, u.name FROM users u JOIN roles r ON r.id = u.role_id WHERE r.is_admin = 1 AND u.active = 1 AND u.email IS NOT NULL"
+        )
+    )
+    body = f"{label} is ready for your review on “{title}” — open TGN Content Studio to have a look.\n"
+    for a in admins:
+        try:
+            email_integration.send_email(a["email"], f"Ready for review: {label} — {title}", body)
+        except (email_integration.EmailNotConfigured, Exception):
+            pass
+    _log(output["campaign_id"], f"{label} is ready for review on “{title}” — notified the admin(s).")
 
 
 def _notify_compilation_ready(stage_row):
@@ -386,11 +529,21 @@ def _notify_compilation_ready(stage_row):
 def schedule_meeting(campaign_id, stage_key, start_iso, end_iso, participant_ids):
     """Creates the meeting the first time, or updates it in place on a
     reschedule (same DB row, same Calendar event — PATCHed rather than
-    duplicated). Returns the campaign's refreshed shoot-stage list."""
+    duplicated). Returns the refreshed stage list — the shoot's shared list
+    for a Targeted campaign-scoped stage, or this output's own list for a
+    Monthly pipeline's output-scoped "film" (Monthly has no shared shoot
+    tier, so its meeting stages live on the single output instead —
+    see PRODUCTION_STAGES_BY_TYPE)."""
     if stage_key not in MEETING_STAGE_KEYS:
         raise ValueError(f"'{stage_key}' isn't a schedulable pipeline stage.")
     stage = db.row_to_dict(
-        db.query_one("SELECT * FROM pipeline_stages WHERE campaign_id = ? AND stage_key = ?", (campaign_id, stage_key))
+        db.query_one(
+            """SELECT * FROM pipeline_stages WHERE stage_key = ? AND (
+                   campaign_id = ?
+                   OR output_id IN (SELECT id FROM content_outputs WHERE campaign_id = ?)
+               )""",
+            (stage_key, campaign_id, campaign_id),
+        )
     )
     if not stage:
         raise ValueError("No such pipeline stage for this campaign.")
@@ -439,18 +592,25 @@ def schedule_meeting(campaign_id, stage_key, start_iso, end_iso, participant_ids
     except Exception as e:
         _log(campaign_id, f"Saved the meeting time for \u201c{title}\u201d, but the Calendar event couldn't be saved: {e}")
 
+    if stage.get("output_id"):
+        return get_stages_with_status(stage["output_id"])
     return get_shoot_stages_with_status(campaign_id)
 
 
 def pending_confirmations_for_admin():
-    """Meeting stages (concept/film — always campaign-scoped now) whose
-    scheduled end time has passed with nobody having said whether it
-    happened — these prompt an admin on their next login."""
+    """Meeting stages whose scheduled end time has passed with nobody having
+    said whether it happened — these prompt an admin on their next login.
+    Covers both campaign-scoped meetings (Targeted's shared concept/film)
+    and output-scoped ones (a Monthly pipeline's own "film" — it has no
+    shared shoot tier, see PRODUCTION_STAGES_BY_TYPE), via a LEFT JOIN
+    through either path."""
     rows = db.rows_to_list(
         db.query(
-            """SELECT ps.*, c.title AS campaign_title
+            """SELECT ps.*, COALESCE(c1.title, c2.title) AS campaign_title
                FROM pipeline_stages ps
-               JOIN campaigns c ON c.id = ps.campaign_id
+               LEFT JOIN campaigns c1 ON c1.id = ps.campaign_id
+               LEFT JOIN content_outputs o ON o.id = ps.output_id
+               LEFT JOIN campaigns c2 ON c2.id = o.campaign_id
                WHERE ps.meeting_end IS NOT NULL AND datetime(ps.meeting_end) < datetime('now')
                  AND ps.meeting_confirmed_at IS NULL
                ORDER BY ps.meeting_end"""
@@ -484,22 +644,42 @@ def reschedule_stage(stage_id, start_iso, end_iso, participant_ids):
 
 def confirm_film_with_delivery(stage_id, recipient_user_id, deadline_iso, note=""):
     """'Yes, Film/Record happened' + the post-shoot hand-off, captured in
-    the same flow: assigns EVERY sibling pipeline output's Edit task to the
-    chosen editor (a real user account) with the given deadline — and, for
-    the Short sibling, silently pre-assigns Final Compilation too, since
-    that's the same editor merging in the audio later. Creates one
-    external-only Calendar deadline invite for the editor (not shown in the
-    app's own calendar views — Jodie's calendar keeps showing only the
-    publish date) and sends one hand-off email pointing at the shared Drive
-    folder. Completes Film/Record, unlocking Edit for both outputs."""
+    the same flow. Two shapes, depending on the stage's scope:
+
+    - Campaign-scoped (Targeted's shared shoot tier): assigns EVERY sibling
+      pipeline output's Edit task to the chosen editor, and for the Short
+      sibling, silently pre-assigns Final Compilation too, since that's the
+      same editor merging in the audio later.
+    - Output-scoped (a Monthly pipeline's own "film" — no shared shoot tier,
+      only ever this one output): assigns just this output's Edit task.
+
+    Either way: creates one external-only Calendar deadline invite for the
+    editor (not shown in the app's own calendar views — Jodie's calendar
+    keeps showing only the publish date), sends one hand-off email pointing
+    at the shoot's shared Drive folder, and completes Film/Record."""
     stage = _get_stage_row_by_id(stage_id)
     if not stage or stage["stage_key"] != "film":
         raise ValueError("This isn't the Film/Record stage.")
-    campaign_id = stage["campaign_id"]
-    campaign = db.row_to_dict(db.query_one("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)))
+    is_shared_shoot = bool(stage.get("campaign_id"))
     recipient = db.row_to_dict(db.query_one("SELECT * FROM users WHERE id = ?", (recipient_user_id,)))
     if not recipient:
         raise ValueError("No such user.")
+
+    if is_shared_shoot:
+        campaign_id = stage["campaign_id"]
+        outputs = db.rows_to_list(
+            db.query(
+                """SELECT o.*, ct.key AS ct_key FROM content_outputs o
+                   JOIN content_types ct ON ct.id = o.content_type_id
+                   WHERE o.campaign_id = ? AND ct.key IN ('targeted_short', 'targeted_long')""",
+                (campaign_id,),
+            )
+        )
+    else:
+        this_output = db.row_to_dict(db.query_one("SELECT * FROM content_outputs WHERE id = ?", (stage["output_id"],)))
+        campaign_id = this_output["campaign_id"]
+        outputs = [this_output]
+    campaign = db.row_to_dict(db.query_one("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)))
 
     db.execute(
         """UPDATE pipeline_stages
@@ -508,17 +688,9 @@ def confirm_film_with_delivery(stage_id, recipient_user_id, deadline_iso, note="
         (recipient_user_id, deadline_iso, stage_id),
     )
 
-    outputs = db.rows_to_list(
-        db.query(
-            """SELECT o.*, ct.key AS ct_key FROM content_outputs o
-               JOIN content_types ct ON ct.id = o.content_type_id
-               WHERE o.campaign_id = ? AND ct.key IN ('targeted_short', 'targeted_long')""",
-            (campaign_id,),
-        )
-    )
     for output in outputs:
         _assign_task(output["id"], "edit", recipient_user_id, deadline_iso, note)
-        if output["ct_key"] == "targeted_short":
+        if is_shared_shoot and output["ct_key"] == "targeted_short":
             comp_task = db.query_one("SELECT id FROM tasks WHERE output_id = ? AND stage_key = 'compilation'", (output["id"],))
             if comp_task:
                 db.execute("UPDATE tasks SET assigned_user_id = ? WHERE id = ?", (recipient_user_id, comp_task["id"]))
@@ -556,8 +728,11 @@ def confirm_film_with_delivery(stage_id, recipient_user_id, deadline_iso, note="
     except Exception as e:
         _log(campaign_id, f"Recorded the edit hand-off to {recipient['name']}, but the email failed to send ({e}).")
 
-    _complete_shared_stage_tasks(campaign_id, "film")
-    return get_shoot_stages_with_status(campaign_id)
+    if is_shared_shoot:
+        _complete_shared_stage_tasks(campaign_id, "film")
+        return get_shoot_stages_with_status(campaign_id)
+    _complete_stage_tasks(stage["output_id"], "film")
+    return get_stages_with_status(stage["output_id"])
 
 
 def _assign_task(output_id, stage_key, recipient_user_id, deadline_iso, note=""):
@@ -641,7 +816,35 @@ def approve_review(stage_id, notes=""):
         (notes, stage_id),
     )
     _complete_stage_tasks(stage["output_id"], stage["stage_key"])
+    if stage["stage_key"] == "review_edit":
+        _maybe_notify_monthly_edit_approved(stage["output_id"])
     return get_stages_with_status(stage["output_id"])
+
+
+def _maybe_notify_monthly_edit_approved(output_id):
+    """Part 22: 'once the video is approved and downloaded... send the
+    creator a confirmation email such as "Thanks!"'. Only applies to a
+    Monthly pipeline output — Targeted has its own further stages (Audio /
+    Compilation / Highlights) after Review Edit, so it isn't "done" yet the
+    way a Monthly video is the moment its edit is approved."""
+    output = db.row_to_dict(db.query_one("SELECT * FROM content_outputs WHERE id = ?", (output_id,)))
+    if not output or not is_monthly_pipeline_eligible(output["content_type_id"]):
+        return
+    task = db.query_one("SELECT assigned_user_id FROM tasks WHERE output_id = ? AND stage_key = 'edit'", (output_id,))
+    if not task or not task["assigned_user_id"]:
+        return
+    editor = db.query_one("SELECT name, email FROM users WHERE id = ?", (task["assigned_user_id"],))
+    if not editor or not editor["email"]:
+        return
+    campaign = _campaign_title_and_owner(output)
+    title = campaign["title"] if campaign else _output_type_label(output)
+    try:
+        email_integration.send_email(
+            editor["email"], f"Approved: {title}",
+            f"Hi {editor['name']},\n\nYour edit for “{title}” is approved and downloaded. Thanks!\n",
+        )
+    except (email_integration.EmailNotConfigured, Exception):
+        pass
 
 
 def reject_review(stage_id, notes):
@@ -746,34 +949,63 @@ def mark_highlights_received(stage_id):
         raise ValueError("This isn't the Highlights stage.")
     clips = db.from_json(stage.get("submission_link"), [])
     output = db.row_to_dict(db.query_one("SELECT * FROM content_outputs WHERE id = ?", (stage["output_id"],)))
-    _feed_highlight_clips_into_followups(output["campaign_id"], clips)
+    ct_key = _content_type_key(output["content_type_id"])
+    _feed_highlight_clips_into_followups(output["campaign_id"], clips, ct_key)
     _complete_stage_tasks(stage["output_id"], "highlights")
     return get_stages_with_status(stage["output_id"])
 
 
-def _feed_highlight_clips_into_followups(campaign_id, clips):
-    """Feeds delivered highlight clips directly into the existing
-    highlight_1/highlight_2 follow-up campaigns (auto-spawned 5/9 days out
-    by content.py's _spawn_targeted_followups): the clip's link is appended
-    onto that campaign's own "Cut highlight from source video" task, so
-    those two posts show up with their raw footage already attached."""
-    followups = db.rows_to_list(
-        db.query(
-            """SELECT c.id, ct.key AS ct_key FROM campaigns c
-               JOIN content_types ct ON ct.id = c.primary_content_type_id
-               WHERE c.depends_on_campaign_id = ? AND ct.key IN ('highlight_1', 'highlight_2')""",
-            (campaign_id,),
+def _feed_highlight_clips_into_followups(campaign_id, clips, source_ct_key="targeted_long"):
+    """Feeds delivered highlight clips directly into existing follow-up
+    campaigns so those posts show up with their raw footage already
+    attached — Targeted (source_ct_key='targeted_long') has exactly two,
+    highlight_1/highlight_2 (auto-spawned by content.py's
+    _spawn_targeted_followups), each with a "Cut highlight from source
+    video" task by name. A Monthly pipeline (podcast_episode/course) instead
+    has however many same-type follow-ups already exist (podcast_episode
+    auto-spawns 3 podcast_highlight campaigns; course has none yet, since
+    it isn't on a scheduling rule — this just no-ops for it, which is
+    expected), attached to whichever task each one has, in publish-date
+    order — matched to clips in the order Jodie captured them."""
+    if source_ct_key == "targeted_long":
+        followups = db.rows_to_list(
+            db.query(
+                """SELECT c.id, ct.key AS ct_key, c.publish_date FROM campaigns c
+                   JOIN content_types ct ON ct.id = c.primary_content_type_id
+                   WHERE c.depends_on_campaign_id = ? AND ct.key IN ('highlight_1', 'highlight_2')
+                   ORDER BY c.publish_date""",
+                (campaign_id,),
+            )
         )
-    )
-    by_key = {f["ct_key"]: f for f in followups}
-    ordered = [by_key.get("highlight_1"), by_key.get("highlight_2")]
+        by_key = {f["ct_key"]: f for f in followups}
+        ordered = [by_key.get("highlight_1"), by_key.get("highlight_2")]
+    else:
+        followup_type = MONTHLY_HIGHLIGHT_FOLLOWUP_TYPE.get(source_ct_key)
+        if not followup_type:
+            return
+        ordered = db.rows_to_list(
+            db.query(
+                """SELECT c.id FROM campaigns c
+                   JOIN content_types ct ON ct.id = c.primary_content_type_id
+                   WHERE c.depends_on_campaign_id = ? AND ct.key = ?
+                   ORDER BY c.publish_date""",
+                (campaign_id, followup_type),
+            )
+        )
+
     for clip, followup in zip(clips, ordered):
         if not followup or not clip.get("url"):
             continue
-        task = db.query_one(
-            "SELECT id, notes FROM tasks WHERE campaign_id = ? AND task_name = 'Cut highlight from source video'",
-            (followup["id"],),
-        )
+        if source_ct_key == "targeted_long":
+            task = db.query_one(
+                "SELECT id, notes FROM tasks WHERE campaign_id = ? AND task_name = 'Cut highlight from source video'",
+                (followup["id"],),
+            )
+        else:
+            # Monthly follow-up types (podcast_highlight/course_highlight)
+            # have no task named "Cut highlight from source video" — just
+            # attach to whichever task that campaign has first.
+            task = db.query_one("SELECT id, notes FROM tasks WHERE campaign_id = ? ORDER BY id LIMIT 1", (followup["id"],))
         if task:
             label = clip.get("label") or "Source clip"
             new_notes = task["notes"] or ""

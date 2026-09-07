@@ -32,19 +32,59 @@ def generate_tasks_for_campaign(campaign_id, only_new_output_type=None):
         # content type is a no-op here.
         pipeline.ensure_pipeline_for_output(output["id"])
 
+        # A Monthly Campaign type (podcast_episode/testimony/course) keeps
+        # its plain flat checklist by default — its staged-pipeline
+        # templates (develop_concept/film/edit/review_edit/highlights) only
+        # get created once that ONE campaign has opted in via
+        # pipeline.start_output_pipeline() (Part 21), which is what actually
+        # creates this output's pipeline_stages rows. Until then, skip them
+        # here so they don't appear alongside the flat list.
+        monthly_pipeline_started = bool(
+            db.query_one("SELECT id FROM pipeline_stages WHERE output_id = ? LIMIT 1", (output["id"],))
+        )
+
         templates = db.rows_to_list(
             db.query(
                 "SELECT * FROM task_templates WHERE content_type_id = ? ORDER BY sort_order",
                 (output["content_type_id"],),
             )
         )
+        # SHOOT_STAGE_KEYS ("script", "concept", "film") is only a *shared,
+        # campaign-level* tier for the always-on Targeted Video pipeline
+        # (targeted_short/targeted_long) — a Monthly pipeline output reuses
+        # the "film" key too, but as its own per-output stage (Monthly has
+        # no shoot tier to share, see pipeline.py PRODUCTION_STAGES_BY_TYPE).
+        # Only treat stage_key membership in SHOOT_STAGE_KEYS as "shared"
+        # for genuinely Targeted-pipeline outputs, or Monthly's own "film"
+        # template/task gets silently skipped/misfiled as campaign-scoped.
+        is_targeted_pipeline_output = pipeline.is_pipeline_content_type_id(output["content_type_id"])
+
         for tpl in templates:
             # Shoot-level stages (script/concept/film) are shared once per
             # campaign — they only ever live on targeted_short's templates
             # (see seed.py PIPELINE_SHOOT_TEMPLATES), and a targeted_long
             # sibling must NOT get its own duplicate copies of them.
-            if tpl["stage_key"] in pipeline.SHOOT_STAGE_KEYS and output["content_type_id"] != targeted_short_id:
+            if (
+                is_targeted_pipeline_output
+                and tpl["stage_key"] in pipeline.SHOOT_STAGE_KEYS
+                and output["content_type_id"] != targeted_short_id
+            ):
                 continue
+
+            if pipeline.is_monthly_pipeline_eligible(output["content_type_id"]):
+                if monthly_pipeline_started:
+                    # The staged pipeline has taken over for this output —
+                    # never regenerate its old flat (stage_key IS NULL)
+                    # checklist templates, or start_output_pipeline()'s
+                    # one-time cleanup of untouched flat tasks would just be
+                    # immediately undone by this very call.
+                    if not tpl["stage_key"]:
+                        continue
+                else:
+                    # Not opted in yet — keep showing the flat checklist,
+                    # not the staged templates.
+                    if tpl["stage_key"]:
+                        continue
 
             # Scope the dedup check by stage_key, not just task_name. Without
             # this, a leftover pre-pipeline task (stage_key IS NULL) that's
@@ -57,7 +97,8 @@ def generate_tasks_for_campaign(campaign_id, only_new_output_type=None):
             # untagged task and a new staged task as distinct tasks. Shared
             # shoot-stage tasks are also deduped campaign-wide (output_id IS
             # NULL), since only one copy should ever exist per campaign.
-            if tpl["stage_key"] in pipeline.SHOOT_STAGE_KEYS:
+            is_shared_shoot_tpl = is_targeted_pipeline_output and tpl["stage_key"] in pipeline.SHOOT_STAGE_KEYS
+            if is_shared_shoot_tpl:
                 exists = db.query_one(
                     "SELECT id FROM tasks WHERE campaign_id = ? AND output_id IS NULL AND task_name = ? AND stage_key = ?",
                     (campaign_id, tpl["task_name"], tpl["stage_key"]),
@@ -76,7 +117,7 @@ def generate_tasks_for_campaign(campaign_id, only_new_output_type=None):
                 continue
             publish_date = date.fromisoformat(output["publish_date"])
             due = (publish_date - timedelta(days=tpl["offset_days_before"])).isoformat()
-            task_output_id = None if tpl["stage_key"] in pipeline.SHOOT_STAGE_KEYS else output["id"]
+            task_output_id = None if is_shared_shoot_tpl else output["id"]
             db.execute(
                 """INSERT INTO tasks (campaign_id, output_id, task_name, role_key, assigned_user_id,
                                        due_date, status, created_from_template, stage_key)
