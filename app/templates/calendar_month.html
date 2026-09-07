@@ -15,9 +15,16 @@
   <a class="btn btn-outline btn-sm" href="{{ url_for('calendar.month_view') }}">Today</a>
 </div>
 
-<div class="legend">
-  {% for l in legend %}
-  <div class="legend-item"><span class="legend-dot" style="background:{{ l.color }}"></span>{{ l.label }}</div>
+<div class="legend legend-grouped">
+  {% for group in legend_groups %}
+  <details class="legend-group">
+    <summary>{{ group.icon }} {{ group.label }} <span class="legend-group-count">({{ group.types|length }})</span></summary>
+    <div class="legend-group-items">
+      {% for l in group.types %}
+      <div class="legend-item"><span class="legend-dot" style="background:{{ l.color }}"></span>{{ l.label }}</div>
+      {% endfor %}
+    </div>
+  </details>
   {% endfor %}
 </div>
 
