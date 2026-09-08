@@ -146,6 +146,15 @@ def generate_tasks_for_campaign(campaign_id, only_new_output_type=None):
                 ),
             )
 
+    # Sept: status is always derived, never manually set — a freshly
+    # generated (or regenerated) set of tasks can change what an output's/
+    # campaign's status should read as, so bring both up to date here rather
+    # than leaving them at whatever add_output()/create_campaign() defaulted
+    # to on creation.
+    for output in outputs:
+        pipeline.sync_output_status(output["id"])
+    pipeline.sync_campaign_status(campaign_id)
+
 
 def _default_assignees_by_role():
     """If exactly one active user holds a role, auto-assign new tasks to

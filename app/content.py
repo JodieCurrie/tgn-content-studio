@@ -532,7 +532,7 @@ def get_campaign_detail(campaign_id):
 
 CAMPAIGN_TEXT_FIELDS = {
     "title", "concept", "script", "script_youtube", "bible_references", "caption", "notes",
-    "notes_to_videographer", "notes_to_musician", "status", "owner_id",
+    "notes_to_videographer", "notes_to_musician", "owner_id",
 }
 
 
@@ -556,7 +556,7 @@ def update_campaign_fields(campaign_id, fields):
 # shouldn't also have to separately check it off. The checkbox stays too,
 # as a manual fallback (e.g. the outline lives somewhere else entirely).
 SCRIPT_FIELD_AUTO_COMPLETE_TASKS = {
-    "script": "Write script",
+    "script": "Write Instagram Script",
     "script_youtube": "Write YouTube script",
 }
 

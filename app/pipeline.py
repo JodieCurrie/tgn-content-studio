@@ -8,7 +8,7 @@ since Short and Long come from the same shoot:
 
     Script Development -> Concept Hashout -> Film/Record
 
-  * Script Development — two plain tasks ("Write script" and "Write
+  * Script Development — two plain tasks ("Write Instagram Script" and "Write
     YouTube script", both tagged stage_key='script'); the stage only
     completes once both are done. The panel also points at the campaign's
     two script fields (`script` / `script_youtube`), which already exist.
@@ -273,6 +273,8 @@ def start_output_pipeline(output_id, actor_id=None):
     task_engine.generate_tasks_for_campaign(output["campaign_id"], only_new_output_type=output["content_type_id"])
 
     _log(output["campaign_id"], f"Started the staged production workflow for {_output_type_label(output)}.")
+    sync_output_status(output_id)
+    sync_campaign_status(output["campaign_id"])
     return get_stages_with_status(output_id)
 
 
@@ -480,6 +482,260 @@ def _derive_status(tasks):
     return "not_started"
 
 
+# ---------------------------------------------------------------------------
+# Automatic status derivation (Sept): the campaign/output "Status" field used
+# to have its own manual dropdown for EVERY workflow type. Jodie asked for
+# that to go away entirely except one explicit "Mark as Published" click at
+# the very end — everything else should read off real task/stage progress.
+# 'published' is the one value nothing below ever assigns on its own; once
+# mark_output_published sets it, every sync call here leaves it alone.
+# ---------------------------------------------------------------------------
+_TERMINAL_OUTPUT_STATUSES = {"published"}
+
+# Roughly chronological — used only to pick a campaign's overall "bottleneck"
+# status across all of its outputs (the least-progressed one is what needs
+# attention, so that's what the calendar/list views should surface).
+_STATUS_ORDER = [
+    "idea", "planned", "concept_script", "to_film", "editing", "changes_requested",
+    "awaiting_review", "approved", "scheduled", "published", "complete",
+]
+_STATUS_RANK = {key: i for i, key in enumerate(_STATUS_ORDER)}
+
+# Which coarse status a stage_key maps to while its stage is the current
+# (first not-yet-complete) one for an output.
+_STAGE_STATUS_MAP = {
+    "script": "concept_script",
+    "concept": "concept_script",
+    "develop_concept": "concept_script",
+    "film": "to_film",
+    "edit": "editing",
+    "audio": "editing",
+    "design_post": "editing",
+    "review_edit": "awaiting_review",
+    "review_audio": "awaiting_review",
+    "review_design": "awaiting_review",
+    "compilation": "approved",
+    "highlights": "approved",
+}
+
+# stage_key a review stage reopens -> the review stage_key itself, e.g.
+# {"edit": "review_edit", ...} — used to detect "changes requested" (a
+# reopened stage whose review was actually rejected, not just a first pass).
+_REOPENED_BY_REVIEW = {v: k for k, v in REOPENS_STAGE.items()}
+
+
+def derive_output_status(output_id):
+    """What content_outputs.status SHOULD be right now, purely from task/
+    stage progress — never trusts the stored column except to recognise the
+    one terminal state (published) that nothing here can reach on its own."""
+    output = db.row_to_dict(db.query_one("SELECT * FROM content_outputs WHERE id = ?", (output_id,)))
+    if not output:
+        return None
+    if output["status"] in _TERMINAL_OUTPUT_STATUSES:
+        return output["status"]
+
+    stages = get_stages_with_status(output_id)
+    if not stages:
+        # No staged pipeline running (never eligible, or an opt-in type that
+        # hasn't started yet) — a flat checklist output derives straight
+        # from its own (non-stage-tagged) tasks.
+        tasks = db.rows_to_list(
+            db.query("SELECT status FROM tasks WHERE output_id = ? AND stage_key IS NULL", (output_id,))
+        )
+        if not tasks:
+            return output["status"] or "idea"
+        if all(t["status"] == "complete" for t in tasks):
+            return "scheduled"
+        if any(t["status"] != "not_started" for t in tasks):
+            return "editing"
+        return "planned"
+
+    shoot = get_shoot_stages_with_status(output["campaign_id"])
+    combined = shoot + stages
+    current = next((s for s in combined if s["status"] != "complete"), None)
+    if current is None:
+        return "scheduled"  # every stage done — ready for "Mark as Published"
+
+    stage_key = current["stage_key"]
+    if stage_key in _REOPENED_BY_REVIEW:
+        review = next((s for s in combined if s["stage_key"] == _REOPENED_BY_REVIEW[stage_key]), None)
+        if review and review.get("review_decision") == "rejected" and review["status"] != "complete":
+            return "changes_requested"
+    return _STAGE_STATUS_MAP.get(stage_key, "editing")
+
+
+def sync_output_status(output_id):
+    """Recomputes and (if changed) saves this output's derived status. Safe
+    to call as often as needed — a no-op write when nothing changed."""
+    output = db.query_one("SELECT status FROM content_outputs WHERE id = ?", (output_id,))
+    if not output:
+        return
+    new_status = derive_output_status(output_id)
+    if new_status and new_status != output["status"]:
+        db.execute("UPDATE content_outputs SET status = ? WHERE id = ?", (new_status, output_id))
+
+
+def sync_campaign_status(campaign_id):
+    """A campaign's status is its outputs' bottleneck — whichever output is
+    least far along is what still needs attention — except when every
+    output has actually been published, at which point the whole campaign
+    is 'complete'."""
+    campaign = db.query_one("SELECT status FROM campaigns WHERE id = ?", (campaign_id,))
+    if not campaign:
+        return
+    outputs = db.rows_to_list(db.query("SELECT status FROM content_outputs WHERE campaign_id = ?", (campaign_id,)))
+    if not outputs:
+        return
+    if all(o["status"] == "published" for o in outputs):
+        new_status = "complete"
+    else:
+        new_status = min((o["status"] for o in outputs), key=lambda s: _STATUS_RANK.get(s, 0))
+    if new_status != campaign["status"]:
+        db.execute("UPDATE campaigns SET status = ? WHERE id = ?", (new_status, campaign_id))
+
+
+def mark_output_published(output_id, actor_id=None):
+    """The one manual action left anywhere in the pipeline (Sept): a web app
+    can't detect that a post has actually gone out on Instagram/YouTube/etc.,
+    so once everything else is done (derived status = 'scheduled'), Jodie
+    (or an admin) says so herself with this one click."""
+    output = db.row_to_dict(db.query_one("SELECT * FROM content_outputs WHERE id = ?", (output_id,)))
+    if not output:
+        raise ValueError("No such content output.")
+    if output["status"] == "published":
+        return get_stages_with_status(output_id)
+    if output["status"] != "scheduled":
+        raise ValueError("This isn't ready to publish yet — finish the remaining steps first.")
+    db.execute("UPDATE content_outputs SET status = 'published' WHERE id = ?", (output_id,))
+    campaign = db.row_to_dict(db.query_one("SELECT * FROM campaigns WHERE id = ?", (output["campaign_id"],)))
+    title = campaign["title"] if campaign else _output_type_label(output)
+    _log(output["campaign_id"], f"Marked “{_output_type_label(output)}” as published for “{title}”.")
+    sync_campaign_status(output["campaign_id"])
+    return get_stages_with_status(output_id)
+
+
+# ---------------------------------------------------------------------------
+# Task-list visibility (Sept): "only show the step that actually needs
+# attention" for every participant, plus an extra declutter rule scoped to
+# Jodie's own (role_key='admin') tasks specifically — see filter_visible_tasks.
+# ---------------------------------------------------------------------------
+DECLUTTER_MONTHS_AHEAD = 3
+
+
+def _stage_unlocked_lookup(campaign_ids, output_ids):
+    """Batches the stage-status walk once per distinct campaign/output
+    rather than once per task row. Returns {(scope, id, stage_key): unlocked}."""
+    lookup = {}
+    for cid in set(cid for cid in campaign_ids if cid):
+        for s in get_shoot_stages_with_status(cid):
+            lookup[("campaign", cid, s["stage_key"])] = s["unlocked"]
+    for oid in set(oid for oid in output_ids if oid):
+        for s in get_stages_with_status(oid):
+            lookup[("output", oid, s["stage_key"])] = s["unlocked"]
+    return lookup
+
+
+def filter_visible_tasks(task_rows):
+    """'I'd only like the tasks that actually need to be done to be added —
+    not all 6 of the steps in the workflow, just the next one needing
+    attention' (Sept). A stage-tagged task is hidden while its stage is
+    still locked, for every participant — once the previous stage
+    completes, the next one's task(s) appear on their own.
+
+    On top of that, Jodie's OWN tasks (role_key='admin') get a second,
+    narrower declutter: they only surface once the campaign has real
+    content behind it (a concept or a source idea — never an empty
+    placeholder like "New Targeted Campaign") AND its publish date is
+    within DECLUTTER_MONTHS_AHEAD months — otherwise every far-future idea
+    would flood her list at once. Every other role's visibility is already
+    correctly gated by a real hand-off event (an edit assigned once
+    film/record wraps, a meeting invite, an explicit filler hand-off), so
+    this second rule never touches their tasks — confirmed with Jodie
+    directly (an empty task is "only an issue for me").
+
+    Expects each row to include campaign_id, output_id, stage_key,
+    role_key, campaign_concept, campaign_source_idea_id and
+    campaign_publish_date (left-joined from campaigns — see
+    routes/tasks.py and routes/calendar.py)."""
+    task_rows = list(task_rows)
+    campaign_ids = [t.get("campaign_id") for t in task_rows]
+    output_ids = [t.get("output_id") for t in task_rows]
+    unlocked_lookup = _stage_unlocked_lookup(campaign_ids, output_ids)
+    cutoff = (date.today() + timedelta(days=30 * DECLUTTER_MONTHS_AHEAD)).isoformat()
+
+    visible = []
+    for t in task_rows:
+        if t.get("stage_key"):
+            key = ("output", t.get("output_id"), t["stage_key"]) if t.get("output_id") \
+                else ("campaign", t.get("campaign_id"), t["stage_key"])
+            if not unlocked_lookup.get(key, True):
+                continue
+        if t.get("role_key") == "admin":
+            has_content = bool((t.get("campaign_concept") or "").strip()) or bool(t.get("campaign_source_idea_id"))
+            if not has_content:
+                continue
+            publish_date = t.get("campaign_publish_date")
+            if publish_date and publish_date > cutoff:
+                continue
+        visible.append(t)
+    return visible
+
+
+def meeting_task_entries_for_user(user_id):
+    """Synthetic, read-only Tasks-tab rows for Concept Hashout / Film-Record
+    meetings where this user is a listed participant (Sept: 'will newly-
+    added admins/team members show up as optional participants?' — yes,
+    already dynamic — and 'should they show up in My Tasks too?' — yes, as a
+    read-only entry here, distinct from the actual admin-owned task).
+    Skipped once the meeting's stage has completed. Shaped to match the
+    tasks.html task_row macro's expected keys."""
+    rows = db.rows_to_list(
+        db.query(
+            """SELECT ps.*, COALESCE(c1.title, c2.title) AS campaign_title,
+                      COALESCE(c1.id, c2.id) AS resolved_campaign_id
+               FROM pipeline_stages ps
+               LEFT JOIN campaigns c1 ON c1.id = ps.campaign_id
+               LEFT JOIN content_outputs o ON o.id = ps.output_id
+               LEFT JOIN campaigns c2 ON c2.id = o.campaign_id
+               WHERE ps.stage_key IN ('concept', 'film') AND ps.participant_user_ids IS NOT NULL"""
+        )
+    )
+    entries = []
+    for r in rows:
+        participant_ids = db.from_json(r.get("participant_user_ids"), [])
+        if user_id not in participant_ids:
+            continue
+        if r.get("campaign_id"):
+            tasks = db.rows_to_list(
+                db.query(
+                    "SELECT status FROM tasks WHERE campaign_id = ? AND output_id IS NULL AND stage_key = ?",
+                    (r["campaign_id"], r["stage_key"]),
+                )
+            )
+        else:
+            tasks = db.rows_to_list(
+                db.query("SELECT status FROM tasks WHERE output_id = ? AND stage_key = ?", (r["output_id"], r["stage_key"]))
+            )
+        status = _derive_status(tasks)
+        if status == "complete":
+            continue
+        entries.append({
+            "id": f"meeting-{r['id']}",
+            "task_name": f"{STAGE_BY_KEY[r['stage_key']]['label']} — meeting",
+            "campaign_title": r["campaign_title"],
+            "campaign_id": r["resolved_campaign_id"],
+            "output_id": r.get("output_id"),
+            "stage_key": r["stage_key"],
+            "status": status,
+            "due_date": (r.get("meeting_start") or "")[:10] or None,
+            "assigned_name": None,
+            "role_key": "member",
+            "content_type_label": None,
+            "is_meeting_entry": True,
+        })
+    return entries
+
+
 def can_advance_task(task):
     """Gating check for PATCH /api/tasks/<id>: may this task's status be
     changed away from 'not_started'? Non-pipeline tasks (stage_key is NULL)
@@ -505,12 +761,24 @@ def can_advance_task(task):
 # ---------------------------------------------------------------------------
 def after_task_status_change(task_id):
     task = db.row_to_dict(db.query_one("SELECT * FROM tasks WHERE id = ?", (task_id,)))
-    if not task or not task["stage_key"]:
+    if not task:
         return
-    if task["output_id"] is None:
-        _after_shoot_task_change(task["campaign_id"], task["stage_key"])
+    if task["stage_key"]:
+        if task["output_id"] is None:
+            _after_shoot_task_change(task["campaign_id"], task["stage_key"])
+        else:
+            _after_production_task_change(task["output_id"], task["stage_key"])
+
+    # Auto status sync (Sept) applies to EVERY task, pipeline or flat — not
+    # just Targeted's. A shared shoot-stage task change can move every
+    # sibling output's status at once (e.g. Film/Record completing), so
+    # sync each of them, then the campaign's own bottleneck status.
+    if task["output_id"] is not None:
+        sync_output_status(task["output_id"])
     else:
-        _after_production_task_change(task["output_id"], task["stage_key"])
+        for o in db.rows_to_list(db.query("SELECT id FROM content_outputs WHERE campaign_id = ?", (task["campaign_id"],))):
+            sync_output_status(o["id"])
+    sync_campaign_status(task["campaign_id"])
 
 
 def _after_shoot_task_change(campaign_id, stage_key):
@@ -1064,6 +1332,8 @@ def decide_filler_audio(stage_id, wants_audio):
     else:
         _maybe_notify_pipeline_output_approved(output["id"], "review_edit")
         _log(output["campaign_id"], f"No audio needed for {_output_type_label(output)} — pipeline finished.")
+    sync_output_status(output["id"])
+    sync_campaign_status(output["campaign_id"])
     return get_stages_with_status(output["id"])
 
 
@@ -1100,6 +1370,8 @@ def reject_review(stage_id, notes):
                 except Exception:
                     pass
     _log(output["campaign_id"], f"Requested changes on {STAGE_BY_KEY[stage['stage_key']]['label']}: {notes}")
+    sync_output_status(output["id"])
+    sync_campaign_status(output["campaign_id"])
     return get_stages_with_status(output["id"])
 
 

@@ -15,6 +15,7 @@ from datetime import date, timedelta
 
 from . import db
 from . import content as content_module
+from . import pipeline
 
 VIDEO_TYPE_KEYS = {
     "targeted_short", "targeted_long", "highlight_1", "highlight_2", "targeted_full_repost",
@@ -141,7 +142,10 @@ def home_summary(user=None):
 
     tasks_due = db.rows_to_list(
         db.query(
-            """SELECT t.*, c.title AS campaign_title FROM tasks t JOIN campaigns c ON c.id = t.campaign_id
+            """SELECT t.*, c.title AS campaign_title,
+                      c.concept AS campaign_concept, c.source_idea_id AS campaign_source_idea_id,
+                      c.publish_date AS campaign_publish_date
+               FROM tasks t JOIN campaigns c ON c.id = t.campaign_id
                WHERE t.due_date BETWEEN ? AND ? AND t.status NOT IN ('complete')
                ORDER BY t.due_date""",
             (start.isoformat(), end.isoformat()),
@@ -149,11 +153,19 @@ def home_summary(user=None):
     )
     overdue = db.rows_to_list(
         db.query(
-            """SELECT t.*, c.title AS campaign_title FROM tasks t JOIN campaigns c ON c.id = t.campaign_id
+            """SELECT t.*, c.title AS campaign_title,
+                      c.concept AS campaign_concept, c.source_idea_id AS campaign_source_idea_id,
+                      c.publish_date AS campaign_publish_date
+               FROM tasks t JOIN campaigns c ON c.id = t.campaign_id
                WHERE t.due_date < ? AND t.status NOT IN ('complete') ORDER BY t.due_date""",
             (date.today().isoformat(),),
         )
     )
+    # Sept: same "only what actually needs attention" visibility rule as the
+    # Tasks/Week/List views, so the dashboard's counts match what a person
+    # actually sees when they click through.
+    tasks_due = pipeline.filter_visible_tasks(tasks_due)
+    overdue = pipeline.filter_visible_tasks(overdue)
     awaiting_approval = db.rows_to_list(
         db.query(
             """SELECT c.* FROM campaigns c WHERE c.status = 'awaiting_review' ORDER BY c.publish_date"""
