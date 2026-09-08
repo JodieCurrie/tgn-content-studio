@@ -220,11 +220,6 @@ document.addEventListener("change", (e) => {
       alert(err.message);
     });
   }
-  if (e.target.classList.contains("js-output-status")) {
-    tgnFetch(`/api/outputs/${e.target.dataset.outputId}`, {
-      method: "PATCH", body: JSON.stringify({ status: e.target.value }),
-    }).catch(() => {});
-  }
 });
 
 // ---------------------------------------------------------------- inspiration / comments / assets
@@ -336,6 +331,13 @@ document.addEventListener("click", (e) => {
   if (markReceivedBtn) {
     const stageId = markReceivedBtn.dataset.stageId;
     tgnFetch(`/api/pipeline-stages/${stageId}/mark-received`, { method: "POST", body: "{}" })
+      .then(() => window.location.reload())
+      .catch((err) => alert(err.message));
+  }
+  const markPublishedBtn = e.target.closest(".js-mark-published");
+  if (markPublishedBtn) {
+    const outputId = markPublishedBtn.dataset.outputId;
+    tgnFetch(`/api/outputs/${outputId}/mark-published`, { method: "POST", body: "{}" })
       .then(() => window.location.reload())
       .catch((err) => alert(err.message));
   }
