@@ -1,4 +1,4 @@
 {% import "partials/_calendar_macros.html" as cal %}
 {% for segment in segments %}
-{{ cal.render_week_segment(segment, by_day, today, meetings_by_day) }}
+{{ cal.render_week_segment(segment, by_day, today, meetings_by_day, deadlines_by_day) }}
 {% endfor %}

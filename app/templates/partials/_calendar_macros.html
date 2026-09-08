@@ -2,7 +2,7 @@
    "load more months" fragments (calendar.js infinite scroll) produce
    byte-identical markup. #}
 
-{% macro render_day(day, by_day, today, month, meetings_by_day={}) %}
+{% macro render_day(day, by_day, today, month, meetings_by_day={}, deadlines_by_day={}) %}
 {% set iso = day.isoformat() %}
 <div class="calendar-day {{ 'today' if day == today }} {{ 'other-month' if day.month != month }}" data-date="{{ iso }}"
      style="--month-tint: {{ month_tint_color(day.month) }};">
@@ -11,8 +11,13 @@
   {# Opaque white base painted under the type-color wash, so the card's own
      color always reads the same regardless of the day cell's month tint
      behind it — the month color stays confined to the empty cell space and
-     never bleeds into (or shifts the color of) a post/event block. #}
+     never bleeds into (or shifts the color of) a post/event block.
+     data-filter-cat/data-filter-owner (Sept, calendar view filters): "custom"
+     events are grouped per-owner, everything else falls under the single
+     "posting" (Posting Schedule) bucket — see calendar.js applyCalendarFilters. #}
   <div class="content-card" draggable="true" data-output-id="{{ item.output_id }}" data-campaign-id="{{ item.campaign_id }}"
+       data-filter-cat="{{ 'custom' if item.type_key == 'custom' else 'posting' }}"
+       data-filter-owner="{{ item.assigned_user_id or '' }}"
        style="background-color:#fff; background-image: linear-gradient({{ item.type_color }}55, {{ item.type_color }}55); border-left-color:{{ item.type_color }};">
     <span class="cc-type">{{ item.type_label }}</span>
     <span class="cc-title">{{ item.campaign_title }}</span>
@@ -24,16 +29,27 @@
   {% endfor %}
   {# Scheduled pipeline meetings (Concept Hashout / Film-Record) — a small
      neutral pill, deliberately not a .content-card so it's excluded from
-     the drag/drop and card-click handlers keyed off data-output-id. #}
+     the drag/drop and card-click handlers keyed off data-output-id. Not
+     covered by the calendar view filters — a shared shoot involves more
+     than one person by nature, same reasoning as calendar.py week_view. #}
   {% for m in meetings_by_day.get(iso, []) %}
   <a class="meeting-pill" href="{{ m.calendar_link or m.meet_link or '#' }}" target="_blank" rel="noopener" title="{{ m.campaign_title }}">
     🗓️ {{ m.label }}
   </a>
   {% endfor %}
+  {# Pipeline hand-off deadlines (edit/audio/design_post — Sept "deadline
+     calendars"): first time these get a visual spot on the app's own
+     calendar, tagged per-owner like Custom Events so each person's
+     deadlines can be shown/hidden independently. #}
+  {% for dl in deadlines_by_day.get(iso, []) %}
+  <div class="deadline-pill" data-filter-cat="deadline" data-filter-owner="{{ dl.owner_id }}" title="{{ dl.campaign_title }} — {{ dl.owner_name }}">
+    ⏰ {{ dl.label }}{% if dl.owner_name %} · {{ dl.owner_name }}{% endif %}
+  </div>
+  {% endfor %}
 </div>
 {% endmacro %}
 
-{% macro render_week_segment(segment, by_day, today, meetings_by_day={}) %}
+{% macro render_week_segment(segment, by_day, today, meetings_by_day={}, deadlines_by_day={}) %}
 {# One vertical, rotated month label spanning every week-row that belongs
    to it, followed immediately by those weeks' day cells — no divider row,
    no week ever rendered twice. Grid auto-placement flows the day cells
@@ -44,7 +60,49 @@
 </div>
 {% for week in segment.weeks %}
   {% for day in week %}
-    {{ render_day(day, by_day, today, segment.month, meetings_by_day) }}
+    {{ render_day(day, by_day, today, segment.month, meetings_by_day, deadlines_by_day) }}
   {% endfor %}
 {% endfor %}
+{% endmacro %}
+
+{# Sept: the calendar view filter panel — a "Posting Schedule" toggle plus
+   one "Custom Events" and one "Deadlines" checkbox per active person, so
+   Jodie (or anyone) can narrow the calendar down to just their own stuff,
+   or just what a particular teammate has on. Purely a client-side display
+   filter (calendar.js), persisted per-browser via localStorage — nothing
+   here changes what's actually scheduled. Shared markup so month/week/list
+   all render byte-identical filter controls. #}
+{% macro render_filter_panel(filter_users, current_user_id) %}
+<div class="calendar-filters card card-pad">
+  <div class="calendar-filters-head">
+    <strong>Show on calendar</strong>
+    <span>
+      <button type="button" class="btn btn-ghost btn-sm js-cal-filter-all">Select all</button>
+      <button type="button" class="btn btn-ghost btn-sm js-cal-filter-none">Deselect all</button>
+    </span>
+  </div>
+  <div class="calendar-filter-groups">
+    <label class="calendar-filter-item">
+      <input type="checkbox" class="js-cal-filter" data-cat="posting" checked> Posting Schedule
+    </label>
+  </div>
+  <div class="page-subtitle" style="margin:10px 0 4px;">Custom events</div>
+  <div class="calendar-filter-groups">
+    {% for u in filter_users %}
+    <label class="calendar-filter-item">
+      <input type="checkbox" class="js-cal-filter" data-cat="custom" data-owner="{{ u.id }}" checked>
+      {{ 'My Custom Events' if u.id == current_user_id else (u.name ~ "’s Custom Events") }}
+    </label>
+    {% endfor %}
+  </div>
+  <div class="page-subtitle" style="margin:10px 0 4px;">Deadlines</div>
+  <div class="calendar-filter-groups">
+    {% for u in filter_users %}
+    <label class="calendar-filter-item">
+      <input type="checkbox" class="js-cal-filter" data-cat="deadline" data-owner="{{ u.id }}" checked>
+      {{ 'My Deadlines' if u.id == current_user_id else (u.name ~ "’s Deadlines") }}
+    </label>
+    {% endfor %}
+  </div>
+</div>
 {% endmacro %}
