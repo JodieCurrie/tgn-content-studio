@@ -23,39 +23,41 @@
    workflow — same tracker as the campaign panel, so the next action is
    right there, not a second click away. #}
 {% set CHECKBOX_STAGE_KEYS = ['script', 'edit', 'audio', 'design_post'] %}
-{% macro task_row(t) %}
-<div class="list-row js-open-campaign" style="cursor:pointer;" data-task-id="{{ t.id }}" data-campaign-id="{{ t.campaign_id }}">
-  {% if not t.stage_key or t.stage_key in CHECKBOX_STAGE_KEYS %}
-  <input type="checkbox" class="js-task-complete" data-task-id="{{ t.id }}" {{ 'checked' if t.status == 'complete' }}>
-  {% else %}
+{% macro task_row(t, scope) %}
+<div class="list-row {{ 'js-open-campaign' if not t.is_meeting_entry }}" style="cursor:{{ 'default' if t.is_meeting_entry else 'pointer' }};" data-task-id="{{ t.id }}" data-campaign-id="{{ t.campaign_id }}">
+  {% if t.is_meeting_entry or (t.stage_key and t.stage_key not in CHECKBOX_STAGE_KEYS) %}
   <span class="status-dot status-{{ 'complete' if t.status == 'complete' else 'idea' }}" title="{{ t.status|status_label }}"></span>
+  {% else %}
+  <input type="checkbox" class="js-task-complete" data-task-id="{{ t.id }}" {{ 'checked' if t.status == 'complete' }}>
   {% endif %}
   <div style="flex:1;">
     <strong>{{ t.task_name }}</strong> — {{ t.campaign_title }}
     <div class="page-subtitle" style="margin:0;">{% if t.due_date %}Due {{ t.due_date|friendly_date }}{% else %}No due date{% endif %}{% if t.assigned_name %} · {{ t.assigned_name }}{% endif %}</div>
   </div>
+  {% if t.content_type_label %}<span class="pill">{{ t.content_type_label }}</span>{% endif %}
   {% if t.stage_key %}<span class="pill">{{ t.stage_key|stage_label }}</span>{% endif %}
+  {% if scope == 'all' %}<span class="pill">{{ t.assigned_name or 'Unassigned' }}</span>{% endif %}
 </div>
 {% endmacro %}
 
 {% if overdue %}
 <div class="section-title" style="color:var(--danger);">Overdue</div>
-<div class="card">{% for t in overdue %}{{ task_row(t) }}{% endfor %}</div>
+<div class="card">{% for t in overdue %}{{ task_row(t, scope) }}{% endfor %}</div>
 {% endif %}
 
 <div class="section-title">This week</div>
 <div class="card">
-  {% if this_week %}{% for t in this_week %}{{ task_row(t) }}{% endfor %}{% else %}<div class="empty-state">Nothing due this week.</div>{% endif %}
+  {% if this_week %}{% for t in this_week %}{{ task_row(t, scope) }}{% endfor %}{% else %}<div class="empty-state">Nothing due this week.</div>{% endif %}
 </div>
 
 <div class="section-title">Later</div>
 <div class="card">
-  {% if later %}{% for t in later %}{{ task_row(t) }}{% endfor %}{% else %}<div class="empty-state">Nothing else on the horizon.</div>{% endif %}
+  {% if later %}{% for t in later %}{{ task_row(t, scope) }}{% endfor %}{% else %}<div class="empty-state">Nothing else on the horizon.</div>{% endif %}
 </div>
 
 {% if done_recently %}
 <div class="section-title">Recently completed</div>
-<div class="card">{% for t in done_recently %}{{ task_row(t) }}{% endfor %}</div>
+<div class="card">{% for t in done_recently %}{{ task_row(t, scope) }}{% endfor %}</div>
 {% endif %}
 {% endblock %}
 {% block scripts %}
