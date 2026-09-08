@@ -193,7 +193,12 @@ def scheduling_rule_new():
     )
     from .. import scheduling
     created = scheduling.materialize_rule(new_id)
-    flash(f"Rule created — {len(created)} upcoming date(s) generated.", "success")
+    filler_created = content_module.fill_weekly_filler_gaps()
+    flash(
+        f"Rule created — {len(created)} upcoming date(s) generated "
+        f"({len(filler_created)} filler gap-day post(s) auto-scheduled to keep every week at the 4-day minimum).",
+        "success",
+    )
     return redirect(url_for("admin.scheduling_rules"))
 
 
