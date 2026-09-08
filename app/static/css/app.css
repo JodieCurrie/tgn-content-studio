@@ -150,18 +150,38 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 .legend-group-count { font-weight: 400; color: var(--text-muted); }
 .legend-group-items { display: flex; flex-wrap: wrap; gap: 8px 14px; padding: 8px 2px 4px; }
 
-/* Sept: calendar view filters — "Posting Schedule" plus a per-person
-   Custom Events / Deadlines checkbox (see partials/_calendar_macros.html
-   render_filter_panel and static/js/calendar.js). Purely a client-side
-   show/hide; .cal-filtered-out uses !important so it wins over the
-   .content-card/.list-row/.deadline-pill display rules below regardless of
-   source order. */
-.calendar-filters { margin-bottom: 14px; }
-.calendar-filters-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-.calendar-filters-head strong { font-size: 13px; }
-.calendar-filter-groups { display: flex; flex-wrap: wrap; gap: 6px 16px; }
-.calendar-filter-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); cursor: pointer; }
+/* Sept: calendar view filters — one compact row: "Posting schedule" plus a
+   small dropdown per person (Custom events + Deadlines for just them), so
+   the whole thing reads as one line instead of a wall of checkboxes (see
+   partials/_calendar_macros.html render_filter_panel and
+   static/js/calendar.js). Purely a client-side show/hide; .cal-filtered-out
+   uses !important so it wins over the .content-card/.list-row/.deadline-pill
+   display rules below regardless of source order. */
+.calendar-filters {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  margin-bottom: 14px; padding: 6px 10px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.calendar-filter-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
 .calendar-filter-item input { margin: 0; }
+.calendar-filter-posting { font-weight: 600; color: var(--text); padding-right: 8px; border-right: 1px solid var(--border); }
+.cal-filter-people { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; }
+.cal-filter-person { position: relative; }
+.cal-filter-person summary {
+  cursor: pointer; font-size: 12.5px; font-weight: 600; list-style: none;
+  display: flex; align-items: center; gap: 4px; user-select: none;
+  padding: 3px 8px; border-radius: 999px; background: var(--surface-alt);
+}
+.cal-filter-person summary::-webkit-details-marker { display: none; }
+.cal-filter-person summary::after { content: "▾"; font-size: 9px; color: var(--text-muted); }
+.cal-filter-badge { width: 6px; height: 6px; border-radius: 50%; background: var(--accent, #C895D5); }
+.cal-filter-person-items {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: var(--shadow-sm); padding: 8px 10px; display: flex; flex-direction: column;
+  gap: 6px; min-width: 130px;
+}
+.calendar-filter-actions { margin-left: auto; display: flex; gap: 4px; }
 .cal-filtered-out { display: none !important; }
 
 /* Pipeline hand-off deadline (edit/audio/design_post — Sept) — a warm,
