@@ -65,44 +65,39 @@
 {% endfor %}
 {% endmacro %}
 
-{# Sept: the calendar view filter panel — a "Posting Schedule" toggle plus
-   one "Custom Events" and one "Deadlines" checkbox per active person, so
-   Jodie (or anyone) can narrow the calendar down to just their own stuff,
-   or just what a particular teammate has on. Purely a client-side display
-   filter (calendar.js), persisted per-browser via localStorage — nothing
-   here changes what's actually scheduled. Shared markup so month/week/list
-   all render byte-identical filter controls. #}
+{# Sept: the calendar view filter panel — a "Posting schedule" toggle plus
+   one compact per-person dropdown (Custom events + Deadlines for that
+   person), so Jodie (or anyone) can narrow the calendar down to just their
+   own stuff, or just what a particular teammate has on, without a wall of
+   checkboxes. Purely a client-side display filter (calendar.js), persisted
+   per-browser via localStorage — nothing here changes what's actually
+   scheduled. Shared markup so month/week/list all render byte-identical
+   filter controls. The little dot next to a closed person's name
+   (.cal-filter-badge, toggled by calendar.js) is the only hint you need
+   that something of theirs is currently hidden, without opening it. #}
 {% macro render_filter_panel(filter_users, current_user_id) %}
-<div class="calendar-filters card card-pad">
-  <div class="calendar-filters-head">
-    <strong>Show on calendar</strong>
-    <span>
-      <button type="button" class="btn btn-ghost btn-sm js-cal-filter-all">Select all</button>
-      <button type="button" class="btn btn-ghost btn-sm js-cal-filter-none">Deselect all</button>
-    </span>
-  </div>
-  <div class="calendar-filter-groups">
-    <label class="calendar-filter-item">
-      <input type="checkbox" class="js-cal-filter" data-cat="posting" checked> Posting Schedule
-    </label>
-  </div>
-  <div class="page-subtitle" style="margin:10px 0 4px;">Custom events</div>
-  <div class="calendar-filter-groups">
+<div class="calendar-filters">
+  <label class="calendar-filter-item calendar-filter-posting">
+    <input type="checkbox" class="js-cal-filter" data-cat="posting" checked> Posting schedule
+  </label>
+  <div class="cal-filter-people">
     {% for u in filter_users %}
-    <label class="calendar-filter-item">
-      <input type="checkbox" class="js-cal-filter" data-cat="custom" data-owner="{{ u.id }}" checked>
-      {{ 'My Custom Events' if u.id == current_user_id else (u.name ~ "’s Custom Events") }}
-    </label>
+    <details class="cal-filter-person">
+      <summary>{{ 'Me' if u.id == current_user_id else u.name }}<span class="cal-filter-badge" data-owner="{{ u.id }}" hidden></span></summary>
+      <div class="cal-filter-person-items">
+        <label class="calendar-filter-item">
+          <input type="checkbox" class="js-cal-filter" data-cat="custom" data-owner="{{ u.id }}" checked> Custom events
+        </label>
+        <label class="calendar-filter-item">
+          <input type="checkbox" class="js-cal-filter" data-cat="deadline" data-owner="{{ u.id }}" checked> Deadlines
+        </label>
+      </div>
+    </details>
     {% endfor %}
   </div>
-  <div class="page-subtitle" style="margin:10px 0 4px;">Deadlines</div>
-  <div class="calendar-filter-groups">
-    {% for u in filter_users %}
-    <label class="calendar-filter-item">
-      <input type="checkbox" class="js-cal-filter" data-cat="deadline" data-owner="{{ u.id }}" checked>
-      {{ 'My Deadlines' if u.id == current_user_id else (u.name ~ "’s Deadlines") }}
-    </label>
-    {% endfor %}
-  </div>
+  <span class="calendar-filter-actions">
+    <button type="button" class="btn btn-ghost btn-sm js-cal-filter-all">Select all</button>
+    <button type="button" class="btn btn-ghost btn-sm js-cal-filter-none">Deselect all</button>
+  </span>
 </div>
 {% endmacro %}
