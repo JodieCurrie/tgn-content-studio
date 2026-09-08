@@ -50,6 +50,40 @@ def run_data_sync():
     return redirect(url_for("admin.home"))
 
 
+# ---------------------------------------------------------------------- reset test data
+# Wipes every scheduled campaign and every content idea so Jodie can test
+# with her own content on a blank calendar, while leaving all the underlying
+# structure (content types, task templates, scheduling rules, creation
+# options, users, roles) untouched. She chose to leave scheduling rules
+# running rather than pause them, so content_module.reset_all_scheduled_content()
+# also forces an immediate re-materialization instead of leaving the
+# calendar empty until the next automatic horizon check. Gated behind a
+# typed confirmation phrase in the template since this is irreversible and
+# there's no Shell/DB access on this host to undo it from outside the app.
+@bp.route("/reset-test-data", methods=["POST"])
+@admin_required
+def reset_test_data():
+    if request.form.get("confirm_phrase", "").strip().upper() != "RESET":
+        flash("Reset cancelled — you need to type RESET exactly to confirm.", "error")
+        return redirect(url_for("admin.home"))
+    try:
+        before = db.query_one("SELECT COUNT(*) c FROM campaigns")["c"]
+        content_module.reset_all_scheduled_content()
+        after = db.query_one("SELECT COUNT(*) c FROM campaigns")["c"]
+    except Exception as e:
+        db.get_db().rollback()
+        print("reset_test_data failed:\n" + traceback.format_exc())
+        flash(f"Reset failed and was rolled back — nothing was changed. Error: {e}", "error")
+        return redirect(url_for("admin.home"))
+    flash(
+        f"Calendar and ideas cleared ({before} campaign(s) removed). "
+        f"Scheduling rules regenerated {after} fresh upcoming post(s) automatically — "
+        f"add your own ideas any time to fill in the rest.",
+        "success",
+    )
+    return redirect(url_for("admin.home"))
+
+
 # ---------------------------------------------------------------------- content types
 @bp.route("/content-types")
 @admin_required
