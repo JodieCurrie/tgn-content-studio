@@ -124,10 +124,10 @@ CREATION_OPTIONS = [
 # actually completes those two stages.
 # (role_key, task_name, offset_days_before, stage_key)
 PIPELINE_SHOOT_TEMPLATES = [
-    ("admin", "Write Instagram Script", 21, "script"),
-    ("admin", "Write YouTube script", 21, "script"),
-    ("admin", "Concept hashout meeting", 17, "concept"),
-    ("production", "Film / record", 12, "film"),
+    ("admin", "Write Instagram Script", 41, "script"),
+    ("admin", "Write YouTube script", 41, "script"),
+    ("admin", "Concept hashout meeting", 34, "concept"),
+    ("production", "Film / record", 27, "film"),
 ]
 
 # Production-level templates branch per output from there. Short keeps the
@@ -141,16 +141,16 @@ PIPELINE_SHOOT_TEMPLATES = [
 # "Mark as received" click, not a checkbox (see SUBMISSION_STAGE_KEYS).
 PIPELINE_PRODUCTION_TEMPLATES = {
     "targeted_short": [
-        ("production", "Edit & export", 7, "edit"),
-        ("admin", "Review edit", 5, "review_edit"),
-        ("music", "Add/record audio", 3, "audio"),
-        ("admin", "Review audio", 1, "review_audio"),
-        ("editor", "Final compilation & polish", 0, "compilation"),
+        ("production", "Edit & export", 20, "edit"),
+        ("admin", "Review edit", 15, "review_edit"),
+        ("music", "Add/record audio", 10, "audio"),
+        ("admin", "Review audio", 5, "review_audio"),
+        ("editor", "Final compilation & polish", 2, "compilation"),
     ],
     "targeted_long": [
-        ("production", "Edit & export", 7, "edit"),
-        ("admin", "Review edit", 3, "review_edit"),
-        ("admin", "Select highlight reels", 0, "highlights"),
+        ("production", "Edit & export", 20, "edit"),
+        ("admin", "Review edit", 15, "review_edit"),
+        ("admin", "Select highlight reels", 2, "highlights"),
     ],
 }
 
@@ -210,8 +210,8 @@ _FILLER_VIDEO_TEMPLATES = [
     ("admin", "Review audio", 1, "review_audio"),
 ]
 _FILLER_DESIGN_TEMPLATES = [
-    ("admin", "Develop concept", 10, "develop_concept"),
-    ("production", "Design post", 4, "design_post"),
+    ("admin", "Develop concept", 14, "develop_concept"),
+    ("production", "Design post", 10, "design_post"),
     ("admin", "Review design", 2, "review_design"),
 ]
 FILLER_PIPELINE_TEMPLATES = {
@@ -259,17 +259,16 @@ TASK_TEMPLATES = {
     "quick_reel": [("admin", "Create Quick Reel", 14)],
     "scripture_expansion": [("admin", "Create Scripture Expansion", 14)],
     "preaching_teaching": [("admin", "Create Preaching / Teaching", 14)],
-    "podcast_additional_highlight": [
-        ("admin", "Pick moment & write copy", 2), ("production", "Create graphic/clip", 1),
-    ],
+    "podcast_additional_highlight": [("production", "Cut Snippet", 14)],
 
     # ---- Monthly ----
     # podcast_episode/testimony/course are opt-in pipeline-eligible too (Part
     # 21/23) — same single "Create X" default as Filler above.
-    "podcast_episode": [("admin", "Create Podcast Episode", 14)],
-    "podcast_highlight": [
-        ("admin", "Pick question & write copy", 2), ("production", "Create graphic/clip", 1),
-    ],
+    # podcast_episode (Sept, per Jodie): default flat checklist expanded from
+    # one task to two — write/draft first, then record — mirroring its
+    # opt-in staged pipeline's develop_concept (30) / film (20) offsets.
+    "podcast_episode": [("admin", "Write & Draft", 30), ("admin", "Record", 20)],
+    "podcast_highlight": [("production", "Cut Snippet", 14)],
     "course": [("admin", "Create Course / Educational", 14)],
     "course_highlight": [
         ("production", "Cut highlight from source lesson", 2), ("admin", "Approve & schedule", 0),
@@ -277,10 +276,8 @@ TASK_TEMPLATES = {
     "blog": [
         ("admin", "Write draft", 6), ("admin", "Review & edit", 2), ("admin", "Publish to website", 0),
     ],
-    "blog_video": [
-        ("production", "Edit companion video", 4), ("admin", "Approve & schedule", 1),
-    ],
-    "testimony": [("admin", "Create Testimony", 14)],
+    "blog_video": [("production", "Create Companion Video", 10)],
+    "testimony": [("admin", "Record Testimony", 20)],
     "bible_study": [("admin", "Create Bible Study", 14)],
 
     "custom": [
@@ -339,11 +336,15 @@ def seed_data():
     _seed_task_templates(type_ids)
     _migrate_targeted_video_pipeline(type_ids)
     _migrate_opt_in_flat_tasks(type_ids)
+    _migrate_flat_task_consolidation(type_ids)
+    _migrate_flat_timeline_update(type_ids)
     _migrate_full_repost_label(type_ids)
     _migrate_full_repost_offset(type_ids)
     _migrate_reinstate_bible_study(type_ids)
     _migrate_write_script_label()
     _seed_opt_in_pipeline_templates(type_ids)
+    _migrate_targeted_timeline_update(type_ids)
+    _migrate_filler_design_timeline_update(type_ids)
     _seed_creation_options(type_ids)
     user_ids = _seed_users()
     _seed_scheduling_rules(type_ids)
@@ -715,6 +716,194 @@ def _migrate_opt_in_flat_tasks(type_ids):
                 task_engine.generate_tasks_for_campaign(output["campaign_id"], only_new_output_type=ct_id)
 
 
+# One-off flat-task consolidation (Sept, per Jodie): these three types each
+# used to split into two small hand-off tasks; she wants each collapsed
+# into a single task. Same shape as _migrate_opt_in_flat_tasks above, but
+# for types that were never opt-in-pipeline-eligible (no MONTHLY_/
+# FILLER_PIPELINE_TEMPLATES entry for any of them), so that function's loop
+# never reaches them and a dedicated one is needed. Fingerprinted the same
+# way — a no-op once the type already has exactly one flat template
+# matching the new name — so it's safe to re-run (e.g. via Admin > Sync).
+FLAT_TASK_CONSOLIDATIONS = ("podcast_highlight", "podcast_additional_highlight", "blog_video")
+
+
+def _migrate_flat_task_consolidation(type_ids):
+    for ct_key in FLAT_TASK_CONSOLIDATIONS:
+        ct_id = type_ids.get(ct_key)
+        new_template = TASK_TEMPLATES.get(ct_key)
+        if not ct_id or not new_template or len(new_template) != 1:
+            continue
+        already_migrated = dbmod.query_one(
+            "SELECT id FROM task_templates WHERE content_type_id = ? AND stage_key IS NULL AND task_name = ?",
+            (ct_id, new_template[0][1]),
+        )
+        flat_count = dbmod.query_one(
+            "SELECT COUNT(*) AS n FROM task_templates WHERE content_type_id = ? AND stage_key IS NULL", (ct_id,)
+        )
+        if already_migrated and flat_count and flat_count["n"] == 1:
+            continue
+
+        dbmod.execute("DELETE FROM task_templates WHERE content_type_id = ? AND stage_key IS NULL", (ct_id,))
+        role_key, name, offset = new_template[0]
+        dbmod.execute(
+            """INSERT INTO task_templates (content_type_id, role_key, task_name, offset_days_before, sort_order, stage_key)
+               VALUES (?,?,?,?,0,NULL)""",
+            (ct_id, role_key, name, offset),
+        )
+
+        outputs = dbmod.rows_to_list(
+            dbmod.query("SELECT * FROM content_outputs WHERE content_type_id = ?", (ct_id,))
+        )
+        for output in outputs:
+            stale = dbmod.rows_to_list(dbmod.query(
+                """SELECT id FROM tasks WHERE output_id = ? AND created_from_template = 1
+                   AND status = 'not_started' AND stage_key IS NULL""",
+                (output["id"],),
+            ))
+            for t in stale:
+                dbmod.execute("DELETE FROM tasks WHERE id = ?", (t["id"],))
+            if stale:
+                task_engine.generate_tasks_for_campaign(output["campaign_id"], only_new_output_type=ct_id)
+
+
+# One-off flat-task timeline update (Sept, per Jodie): podcast_episode's
+# default flat checklist grows from one task to two ("Write & Draft" then
+# "Record", mirroring its opt-in staged pipeline's develop_concept/film
+# offsets), and testimony's single flat task moves from 14 to 20 days
+# before. Same delete-and-reinsert shape as _migrate_flat_task_consolidation
+# above, generalized to any number of flat tasks — fingerprinted on the
+# *entire* flat template set (names, offsets, and order) matching
+# TASK_TEMPLATES exactly, not just a row count of 1, so both an expansion
+# and a same-count offset tweak go through one function and it's still a
+# safe no-op once applied (e.g. re-run via Admin > Sync).
+FLAT_TIMELINE_UPDATES = ("podcast_episode", "testimony")
+
+
+def _migrate_flat_timeline_update(type_ids):
+    for ct_key in FLAT_TIMELINE_UPDATES:
+        ct_id = type_ids.get(ct_key)
+        new_template = TASK_TEMPLATES.get(ct_key)
+        if not ct_id or not new_template:
+            continue
+        current = dbmod.rows_to_list(dbmod.query(
+            """SELECT task_name, offset_days_before FROM task_templates
+               WHERE content_type_id = ? AND stage_key IS NULL ORDER BY sort_order""",
+            (ct_id,),
+        ))
+        target = [{"task_name": name, "offset_days_before": offset} for (_role, name, offset) in new_template]
+        if current == target:
+            continue  # already matches — no-op
+
+        dbmod.execute("DELETE FROM task_templates WHERE content_type_id = ? AND stage_key IS NULL", (ct_id,))
+        for order, (role_key, name, offset) in enumerate(new_template):
+            dbmod.execute(
+                """INSERT INTO task_templates (content_type_id, role_key, task_name, offset_days_before, sort_order, stage_key)
+                   VALUES (?,?,?,?,?,NULL)""",
+                (ct_id, role_key, name, offset, order),
+            )
+
+        outputs = dbmod.rows_to_list(
+            dbmod.query("SELECT * FROM content_outputs WHERE content_type_id = ?", (ct_id,))
+        )
+        for output in outputs:
+            if dbmod.query_one("SELECT id FROM pipeline_stages WHERE output_id = ? LIMIT 1", (output["id"],)):
+                continue  # already running its staged pipeline — leave it alone
+            stale = dbmod.rows_to_list(dbmod.query(
+                """SELECT id FROM tasks WHERE output_id = ? AND created_from_template = 1
+                   AND status = 'not_started' AND stage_key IS NULL""",
+                (output["id"],),
+            ))
+            for t in stale:
+                dbmod.execute("DELETE FROM tasks WHERE id = ?", (t["id"],))
+            if stale:
+                task_engine.generate_tasks_for_campaign(output["campaign_id"], only_new_output_type=ct_id)
+
+
+# Generic one-off offset updater, shared by the two timeline migrations
+# below. Updates a stage-tagged task_templates row's offset_days_before in
+# place (matched by content_type_id + stage_key) and cascades the same new
+# offset to any already-created, not-yet-worked task from that template —
+# recomputing its due_date from its own campaign's or output's actual
+# publish_date. Never touches a task someone has already started or
+# finished. A stage already sitting at the target offset is skipped, so
+# this is a safe no-op to re-run (e.g. via Admin > Sync) once applied, and
+# it won't re-fire on a stage a later change has since moved on purpose.
+def _update_stage_offsets(ct_id, updates):
+    for stage_key, new_offset in updates.items():
+        tpl = dbmod.query_one(
+            "SELECT id, offset_days_before FROM task_templates WHERE content_type_id = ? AND stage_key = ?",
+            (ct_id, stage_key),
+        )
+        if not tpl or tpl["offset_days_before"] == new_offset:
+            continue
+        dbmod.execute("UPDATE task_templates SET offset_days_before = ? WHERE id = ?", (new_offset, tpl["id"]))
+
+        tasks = dbmod.rows_to_list(dbmod.query(
+            """SELECT id, output_id, campaign_id FROM tasks
+               WHERE stage_key = ? AND created_from_template = 1 AND status = 'not_started'
+               AND (output_id IN (SELECT id FROM content_outputs WHERE content_type_id = ?)
+                    OR (output_id IS NULL AND campaign_id IN
+                        (SELECT id FROM campaigns WHERE primary_content_type_id = ?)))""",
+            (stage_key, ct_id, ct_id),
+        ))
+        for t in tasks:
+            pub = None
+            if t["output_id"]:
+                row = dbmod.query_one("SELECT publish_date FROM content_outputs WHERE id = ?", (t["output_id"],))
+                pub = row["publish_date"] if row else None
+            else:
+                row = dbmod.query_one("SELECT publish_date FROM campaigns WHERE id = ?", (t["campaign_id"],))
+                pub = row["publish_date"] if row else None
+            if not pub:
+                continue
+            new_due = (date.fromisoformat(pub) - timedelta(days=new_offset)).isoformat()
+            dbmod.execute("UPDATE tasks SET due_date = ? WHERE id = ?", (new_due, t["id"]))
+
+
+# One-off production-timeline update (Sept, per Jodie): she gave real lead
+# times for each role, chained backward from posting day — the musician
+# needs 10 days; the videographer needs 10 days before handing off to the
+# musician (20); she needs 7 days to record before handing off to the
+# videographer (27); and 2 weeks to write before that (41). Final
+# compilation/polish (Short) and picking highlight reels (Long, which feeds
+# the highlight-cut follow-ups) both move to 2 days before posting, per her
+# "1 or 2 days" note. Concept Hashout, Review Edit and Review Audio weren't
+# given explicit numbers — placed as sensible buffers between the anchored
+# stages. There's no in-place edit for task templates yet (only add/
+# delete), so any further tweak to these needs another migration like this
+# one rather than an Admin-page edit.
+TARGETED_SHOOT_OFFSETS = {"script": 41, "concept": 34, "film": 27}
+TARGETED_PRODUCTION_OFFSETS = {
+    "targeted_short": {"edit": 20, "review_edit": 15, "audio": 10, "review_audio": 5, "compilation": 2},
+    "targeted_long": {"edit": 20, "review_edit": 15, "highlights": 2},
+}
+
+
+def _migrate_targeted_timeline_update(type_ids):
+    short_id = type_ids.get("targeted_short")
+    long_id = type_ids.get("targeted_long")
+    if short_id:
+        _update_stage_offsets(short_id, TARGETED_SHOOT_OFFSETS)
+        _update_stage_offsets(short_id, TARGETED_PRODUCTION_OFFSETS["targeted_short"])
+    if long_id:
+        _update_stage_offsets(long_id, TARGETED_PRODUCTION_OFFSETS["targeted_long"])
+
+
+# One-off filler-design-timeline update (Sept, per Jodie): "Develop concept"
+# moves to 14 days before publish, "Design post" to 10 — for the 5 filler
+# subtypes that use the design (no film/audio) pipeline shape. "Review
+# design" wasn't mentioned, so it's left where it is (2).
+FILLER_DESIGN_OFFSETS = {"develop_concept": 14, "design_post": 10}
+
+
+def _migrate_filler_design_timeline_update(type_ids):
+    for ct_key in pipeline.FILLER_DESIGN_PIPELINE_TYPE_KEYS:
+        ct_id = type_ids.get(ct_key)
+        if not ct_id:
+            continue
+        _update_stage_offsets(ct_id, FILLER_DESIGN_OFFSETS)
+
+
 def _seed_creation_options(type_ids):
     for i, (key, label, icon, type_keys, pick_subtype) in enumerate(CREATION_OPTIONS):
         existing = dbmod.query_one("SELECT id FROM creation_options WHERE key = ?", (key,))
@@ -800,21 +989,30 @@ def _seed_scheduling_rules(type_ids):
                 params + (ct_id,),
             )
 
+    # Every rule's horizon is a full year (Sept, per Jodie: the calendar's
+    # posting rhythm should keep auto-scheduling indefinitely — only the
+    # task lists get a short 3-month declutter, see
+    # pipeline.DECLUTTER_MONTHS_AHEAD). scheduling.ensure_horizon_rolled_
+    # forward() re-materializes every active rule on its own every
+    # HORIZON_REFRESH_HOURS, so this year-ahead window keeps rolling
+    # forward day by day rather than ever quietly running out again.
+    RULE_HORIZON_WEEKS = 52
+
     # Targeted Campaign — unchanged biweekly Wednesday rhythm.
     anchor = next_weekday(today, 2)  # Wednesday
     _upsert_rule("targeted_short", "Targeted Campaign — biweekly Wednesday", "biweekly", 2,
-                 anchor, 12, "New Targeted Campaign", interval_days=14)
+                 anchor, RULE_HORIZON_WEEKS, "New Targeted Campaign", interval_days=14)
 
     # Testimony — first Tuesday of every month.
     anchor = _roll_to_next_valid_month(lambda y, m: scheduling.nth_weekday_of_month(y, m, 1, 1), today.year, today.month)
     _upsert_rule("testimony", "Testimony — first Tuesday of the month", "monthly_nth_weekday", 1,
-                 anchor, 16, "Monthly Testimony", nth=1)
+                 anchor, RULE_HORIZON_WEEKS, "Monthly Testimony", nth=1)
 
     # Blog Post — second-last Thursday of every month (Blog Post Video pairs
     # automatically the same day — see content._spawn_paired_and_followup_content).
     anchor = _roll_to_next_valid_month(lambda y, m: scheduling.second_last_weekday_of_month(y, m, 3), today.year, today.month)
     _upsert_rule("blog", "Blog Post — second-last Thursday of the month", "monthly_second_last_weekday", 3,
-                 anchor, 16, "Monthly Blog Post")
+                 anchor, RULE_HORIZON_WEEKS, "Monthly Blog Post")
 
     # Podcast Episode — second Thursday of every third month. 3 Highlight/
     # Question posts per cycle spawn automatically (see
@@ -822,7 +1020,7 @@ def _seed_scheduling_rules(type_ids):
     # for those, they follow the episode.
     anchor = _roll_to_next_valid_month(lambda y, m: scheduling.nth_weekday_of_month(y, m, 3, 2), today.year, today.month)
     _upsert_rule("podcast_episode", "Podcast Episode — every 3rd month (2nd Thursday)", "every_n_months_nth_weekday",
-                 3, anchor, 60, "Monthly Podcast Episode", nth=2, interval_months=3)
+                 3, anchor, RULE_HORIZON_WEEKS, "Monthly Podcast Episode", nth=2, interval_months=3)
 
 
 def _seed_ideas(user_ids):
