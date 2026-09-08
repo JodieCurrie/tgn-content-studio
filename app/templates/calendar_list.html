@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "partials/_calendar_macros.html" as cal %}
 {% block title %}List — TGN Content Studio{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -9,11 +10,14 @@
   <button class="btn btn-primary" id="create-content-btn">+ Create Content</button>
 </div>
 
+{{ cal.render_filter_panel(filter_users, current_user_id) }}
+
 {% if overdue_tasks %}
 <div class="section-title" style="color:var(--danger);">Overdue tasks</div>
 <div class="card">
   {% for t in overdue_tasks %}
-  <div class="list-row" data-campaign-id="{{ t.campaign_id }}">
+  <div class="list-row" data-campaign-id="{{ t.campaign_id }}"
+       {% if t.stage_key in deadline_stage_keys %}data-filter-cat="deadline" data-filter-owner="{{ t.assigned_user_id or '' }}"{% endif %}>
     <span class="status-dot" style="background:var(--danger);"></span>
     <div style="flex:1;"><strong>{{ t.task_name }}</strong> — {{ t.campaign_title }}
       <div class="page-subtitle" style="margin:0;">Was due {{ t.due_date|friendly_date }}{% if t.assigned_name %} · {{ t.assigned_name }}{% endif %}</div>
@@ -28,7 +32,8 @@
 <div class="card">
   {% if upcoming %}
     {% for o in upcoming %}
-    <div class="list-row" data-campaign-id="{{ o.campaign_id }}">
+    <div class="list-row" data-campaign-id="{{ o.campaign_id }}"
+         data-filter-cat="{{ 'custom' if o.type_key == 'custom' else 'posting' }}" data-filter-owner="{{ o.assigned_user_id or '' }}">
       <span class="type-chip" style="background:{{ o.type_color }}55;">{{ o.type_label }}</span>
       <div style="flex:1;">
         <strong>{{ o.title }}</strong>
@@ -46,7 +51,8 @@
 <div class="card">
   {% if upcoming_tasks %}
     {% for t in upcoming_tasks %}
-    <div class="list-row" data-campaign-id="{{ t.campaign_id }}">
+    <div class="list-row" data-campaign-id="{{ t.campaign_id }}"
+         {% if t.stage_key in deadline_stage_keys %}data-filter-cat="deadline" data-filter-owner="{{ t.assigned_user_id or '' }}"{% endif %}>
       <span class="status-dot status-{{ t.status }}"></span>
       <div style="flex:1;"><strong>{{ t.task_name }}</strong> — {{ t.campaign_title }}
         <div class="page-subtitle" style="margin:0;">Due {{ t.due_date|friendly_date }}{% if t.assigned_name %} · {{ t.assigned_name }}{% endif %}</div>

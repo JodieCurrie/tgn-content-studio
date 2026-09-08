@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "partials/_calendar_macros.html" as cal %}
 {% block title %}{{ start|friendly_date }} – {{ end|friendly_date }} — TGN Content Studio{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -15,6 +16,8 @@
   <a class="btn btn-outline btn-sm" href="{{ url_for('calendar.week_view', date=next_week) }}">Next ›</a>
 </div>
 
+{{ cal.render_filter_panel(filter_users, current_user_id) }}
+
 <div class="week-grid">
   {% for day in days %}
   {% set iso = day.isoformat() %}
@@ -22,6 +25,8 @@
     <div class="week-day-head">{{ day.strftime('%a %-d') }}</div>
     {% for item in by_day.get(iso, []) %}
     <div class="content-card" draggable="true" data-output-id="{{ item.output_id }}" data-campaign-id="{{ item.campaign_id }}"
+         data-filter-cat="{{ 'custom' if item.type_key == 'custom' else 'posting' }}"
+         data-filter-owner="{{ item.assigned_user_id or '' }}"
          style="background:{{ item.type_color }}55; border-left-color:{{ item.type_color }}; margin-bottom:6px;">
       <span class="cc-type">{{ item.type_label }}</span>
       <span class="cc-title">{{ item.campaign_title }}</span>
@@ -35,6 +40,11 @@
     <a class="meeting-pill" href="{{ m.calendar_link or m.meet_link or '#' }}" target="_blank" rel="noopener" title="{{ m.campaign_title }}" style="margin-bottom:6px;">
       🗓️ {{ m.label }}
     </a>
+    {% endfor %}
+    {% for dl in deadlines_by_day.get(iso, []) %}
+    <div class="deadline-pill" data-filter-cat="deadline" data-filter-owner="{{ dl.owner_id }}" title="{{ dl.campaign_title }} — {{ dl.owner_name }}" style="margin-bottom:6px;">
+      ⏰ {{ dl.label }}{% if dl.owner_name %} · {{ dl.owner_name }}{% endif %}
+    </div>
     {% endfor %}
   </div>
   {% endfor %}
