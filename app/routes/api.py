@@ -480,10 +480,28 @@ def create_idea():
     if not title:
         return jsonify({"error": "Please enter an idea."}), 400
     idea_id = db.execute(
-        "INSERT INTO content_ideas (title, notes, created_by) VALUES (?,?,?)",
-        (title, data.get("notes", ""), g.user["id"]),
+        "INSERT INTO content_ideas (title, notes, links, content_type_id, created_by) VALUES (?,?,?,?,?)",
+        (title, data.get("notes", ""), data.get("links", ""), data.get("content_type_id"), g.user["id"]),
     )
     return jsonify({"id": idea_id})
+
+
+IDEA_EDITABLE_FIELDS = {"title", "notes", "links", "content_type_id"}
+
+
+@bp.route("/ideas/<int:idea_id>", methods=["PATCH"])
+@login_required
+def update_idea(idea_id):
+    idea = db.query_one("SELECT id FROM content_ideas WHERE id = ?", (idea_id,))
+    if not idea:
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json(force=True)
+    fields = {k: v for k, v in data.items() if k in IDEA_EDITABLE_FIELDS}
+    if not fields:
+        return jsonify({"ok": True})
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    db.execute(f"UPDATE content_ideas SET {set_clause} WHERE id = ?", (*fields.values(), idea_id))
+    return jsonify({"ok": True})
 
 
 @bp.route("/ideas/<int:idea_id>", methods=["DELETE"])
@@ -503,7 +521,7 @@ def schedule_idea(idea_id):
     if not idea:
         return jsonify({"error": "Not found"}), 404
     data = request.get_json(force=True)
-    content_type_id = data.get("content_type_id")
+    content_type_id = data.get("content_type_id") or idea.get("content_type_id")
     publish_date = data.get("publish_date")
     if not content_type_id or not publish_date:
         return jsonify({"error": "Choose a content type and date."}), 400
@@ -512,6 +530,7 @@ def schedule_idea(idea_id):
         title=idea["title"],
         publish_date_iso=publish_date,
         content_type_id=content_type_id,
+        notes=content_module.idea_notes_with_links(idea),
         owner_id=g.user["id"],
         created_by=g.user["id"],
         source_idea_id=idea_id,

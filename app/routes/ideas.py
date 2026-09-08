@@ -11,8 +11,11 @@ bp = Blueprint("ideas", __name__, url_prefix="/ideas")
 def index():
     ideas = db.rows_to_list(
         db.query(
-            """SELECT i.*, u.name AS created_by_name FROM content_ideas i
+            """SELECT i.*, u.name AS created_by_name, ct.label AS type_label, ct.color AS type_color,
+                      ct.category_key AS type_category
+               FROM content_ideas i
                LEFT JOIN users u ON u.id = i.created_by
+               LEFT JOIN content_types ct ON ct.id = i.content_type_id
                WHERE i.scheduled_campaign_id IS NULL ORDER BY i.created_at DESC"""
         )
     )
@@ -24,4 +27,13 @@ def index():
         )
     )
     content_types = db.rows_to_list(db.query("SELECT * FROM content_types WHERE archived = 0 ORDER BY sort_order"))
-    return render_template("ideas.html", ideas=ideas, scheduled=scheduled, content_types=content_types)
+    # Monthly/Filler each get their own "what type of post" dropdown once an
+    # idea is tagged with that category (Ideas overhaul, Sept); Targeted
+    # Campaign ideas need no sub-type — one output always spawns the rest.
+    monthly_types = [t for t in content_types if t["category_key"] == "monthly"]
+    filler_types = [t for t in content_types if t["category_key"] == "filler"]
+    targeted_types = [t for t in content_types if t["category_key"] == "targeted" and t["is_campaign_type"]]
+    return render_template(
+        "ideas.html", ideas=ideas, scheduled=scheduled, content_types=content_types,
+        monthly_types=monthly_types, filler_types=filler_types, targeted_types=targeted_types,
+    )
