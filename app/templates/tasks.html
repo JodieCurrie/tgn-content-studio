@@ -14,18 +14,27 @@
   {% endif %}
 </div>
 
+{# Sept redesign: no more manual status dropdown — status is always derived
+   from what's actually happened (an assignment, a submission, an approval).
+   A plain checklist step (no stage_key, or a not-yet-gated stage like Edit/
+   Audio/Design Post/Script) is a single checkbox click; anything with its
+   own dedicated action (scheduling, review, hand-off, submission) shows a
+   quiet "what's next" hint instead, and the whole row opens that step's
+   workflow — same tracker as the campaign panel, so the next action is
+   right there, not a second click away. #}
+{% set CHECKBOX_STAGE_KEYS = ['script', 'edit', 'audio', 'design_post'] %}
 {% macro task_row(t) %}
-<div class="list-row" style="cursor:default;" data-task-id="{{ t.id }}">
+<div class="list-row js-open-campaign" style="cursor:pointer;" data-task-id="{{ t.id }}" data-campaign-id="{{ t.campaign_id }}">
+  {% if not t.stage_key or t.stage_key in CHECKBOX_STAGE_KEYS %}
   <input type="checkbox" class="js-task-complete" data-task-id="{{ t.id }}" {{ 'checked' if t.status == 'complete' }}>
+  {% else %}
+  <span class="status-dot status-{{ 'complete' if t.status == 'complete' else 'idea' }}" title="{{ t.status|status_label }}"></span>
+  {% endif %}
   <div style="flex:1;">
-    <strong class="js-open-campaign" style="cursor:pointer;" data-campaign-id="{{ t.campaign_id }}">{{ t.task_name }}</strong> — {{ t.campaign_title }}
+    <strong>{{ t.task_name }}</strong> — {{ t.campaign_title }}
     <div class="page-subtitle" style="margin:0;">{% if t.due_date %}Due {{ t.due_date|friendly_date }}{% else %}No due date{% endif %}{% if t.assigned_name %} · {{ t.assigned_name }}{% endif %}</div>
   </div>
-  <select class="field-select js-task-status" data-task-id="{{ t.id }}" style="width:auto;">
-    {% for s in ['not_started','in_progress','waiting','submitted','changes_requested','approved','complete'] %}
-    <option value="{{ s }}" {{ 'selected' if t.status == s }}>{{ s|status_label }}</option>
-    {% endfor %}
-  </select>
+  {% if t.stage_key %}<span class="pill">{{ t.stage_key|stage_label }}</span>{% endif %}
 </div>
 {% endmacro %}
 

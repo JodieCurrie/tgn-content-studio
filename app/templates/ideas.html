@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <h1 class="page-title">💡 Content Ideas</h1>
-    <div class="page-subtitle">Dump ideas here the moment they occur to you — thinking of content is separate from scheduling it.</div>
+    <div class="page-subtitle">Dump ideas here the moment they occur to you. Tag one with a type and it fills that slot on the calendar automatically — no need to schedule it by hand.</div>
   </div>
 </div>
 
@@ -19,14 +19,17 @@
 <div class="card">
   {% if ideas %}
     {% for i in ideas %}
-    <div class="list-row" style="cursor:default;" data-idea-id="{{ i.id }}">
-      <div style="flex:1;"><strong>{{ i.title }}</strong>
+    <div class="list-row js-open-idea" style="cursor:pointer;" data-idea-id="{{ i.id }}">
+      <div style="flex:1;">
+        <strong>{{ i.title }}</strong>
+        {% if i.type_label %}<span class="pill" style="margin-left:6px; background:{{ i.type_color }}33;">{{ i.type_label }}</span>{% else %}<span class="page-subtitle">· untagged</span>{% endif %}
         {% if i.notes %}<div class="page-subtitle" style="margin:0;">{{ i.notes }}</div>{% endif %}
+        {% if i.links %}<div class="page-subtitle" style="margin:0;">🔗 {{ i.links.splitlines()|length }} link(s)</div>{% endif %}
       </div>
       {% if current_user.role_is_admin %}
-      <button class="btn btn-sm btn-outline js-schedule-idea" data-idea-id="{{ i.id }}" data-idea-title="{{ i.title }}">Schedule idea</button>
+      <button type="button" class="btn btn-sm btn-outline js-schedule-idea" data-idea-id="{{ i.id }}" data-idea-title="{{ i.title }}" data-idea-type-id="{{ i.content_type_id or '' }}">Schedule now</button>
       {% endif %}
-      <button class="btn btn-sm btn-ghost js-delete-idea" data-idea-id="{{ i.id }}">✕</button>
+      <button type="button" class="btn btn-sm btn-ghost js-delete-idea" data-idea-id="{{ i.id }}">✕</button>
     </div>
     {% endfor %}
   {% else %}
@@ -48,10 +51,15 @@
 {% endif %}
 
 <div id="schedule-idea-modal-slot"></div>
+<div id="edit-idea-modal-slot"></div>
 {% endblock %}
 {% block scripts %}
 <script>
 window.TGN_CONTENT_TYPES = {{ content_types|tojson }};
+window.TGN_MONTHLY_TYPES = {{ monthly_types|tojson }};
+window.TGN_FILLER_TYPES = {{ filler_types|tojson }};
+window.TGN_TARGETED_TYPES = {{ targeted_types|tojson }};
+window.TGN_IDEAS_BY_ID = {{ ideas|tojson }}.reduce((acc, i) => { acc[i.id] = i; return acc; }, {});
 </script>
 <script src="{{ url_for('static', filename='js/ideas.js') }}"></script>
 {% endblock %}
