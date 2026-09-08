@@ -52,7 +52,7 @@ CONTENT_TYPES = [
     # The full long-form video, cut to portrait and reposted across the other
     # platforms once the highlight reels are done — the "5th targeted type"
     # Jodie asked us to name; renameable any time from Admin > Content Types.
-    ("targeted_full_repost", "Full Episode — Portrait Repost", "#E08A45", "targeted", 0, 1, 0, 1, 3, ["instagram", "facebook", "threads", "tiktok"], 0),
+    ("targeted_full_repost", "Full YouTube — Portrait Repost", "#E08A45", "targeted", 0, 1, 0, 1, 3, ["instagram", "facebook", "threads", "tiktok"], 0),
 
     # ---- Filler Post (Part 8): 9 subtypes under one "Filler Post" menu option ----
     ("tiktok_style", "TikTok Style Reel", "#A3C0B6", "filler", 1, 1, 0, 1, 4, ["tiktok"], 0),
@@ -79,6 +79,9 @@ CONTENT_TYPES = [
     ("blog", "Blog Post", "#FEC4D5", "monthly", 0, 0, 0, 1, 7, ["website"], 0),
     ("blog_video", "Blog Post Video", "#F7A8C4", "monthly", 0, 1, 0, 1, 7, ["youtube", "instagram"], 0),
     ("testimony", "Testimony", "#75AAC9", "monthly", 0, 1, 0, 1, 10, ["instagram", "youtube", "facebook"], 0),
+    # Reinstated (Sept, per Jodie's Ideas-tab request) as a 4th opt-in
+    # Monthly pipeline type, alongside podcast_episode/testimony/course.
+    ("bible_study", "Bible Study", "#B7A6D6", "monthly", 0, 1, 0, 1, 10, ["youtube", "instagram", "facebook"], 0),
 
     # Custom Events (Part 19) are scheduling blocks (team unavailable, a
     # holiday, a busy period) rather than actual content, so they get their
@@ -100,6 +103,7 @@ CREATION_OPTIONS = [
     ], True),
     ("monthly_campaign", "Monthly Campaign", "📅", [
         "podcast_episode", "podcast_highlight", "course", "course_highlight", "blog", "blog_video", "testimony",
+        "bible_study",
     ], True),
     ("custom", "Custom Event", "✨", ["custom"], False),
 ]
@@ -168,6 +172,12 @@ MONTHLY_PIPELINE_TEMPLATES = {
         ("admin", "Select highlight reels", 3, "highlights"),
     ],
     "testimony": [
+        ("admin", "Develop concept", 30, "develop_concept"),
+        ("production", "Film / record", 20, "film"),
+        ("production", "Edit & export", 10, "edit"),
+        ("admin", "Review edit", 5, "review_edit"),
+    ],
+    "bible_study": [
         ("admin", "Develop concept", 30, "develop_concept"),
         ("production", "Film / record", 20, "film"),
         ("production", "Edit & export", 10, "edit"),
@@ -270,6 +280,7 @@ TASK_TEMPLATES = {
         ("production", "Edit companion video", 4), ("admin", "Approve & schedule", 1),
     ],
     "testimony": [("admin", "Create Testimony", 14)],
+    "bible_study": [("admin", "Create Bible Study", 14)],
 
     "custom": [
         ("admin", "Plan & schedule", 2),
@@ -327,6 +338,8 @@ def seed_data():
     _seed_task_templates(type_ids)
     _migrate_targeted_video_pipeline(type_ids)
     _migrate_opt_in_flat_tasks(type_ids)
+    _migrate_full_repost_label(type_ids)
+    _migrate_reinstate_bible_study(type_ids)
     _seed_opt_in_pipeline_templates(type_ids)
     _seed_creation_options(type_ids)
     user_ids = _seed_users()
@@ -417,12 +430,40 @@ def _seed_content_types():
 # (Part 7/8/9) replaced or split up. They're archived, never deleted — any
 # already-scheduled content still using one keeps working, it just drops out
 # of the "+ Create Content" menu and admin lists going forward.
-DEPRECATED_CONTENT_TYPE_KEYS = ["highlight", "podcast_question", "bible_study", "preaching_snippet"]
+DEPRECATED_CONTENT_TYPE_KEYS = ["highlight", "podcast_question", "preaching_snippet"]
 
 
 def _archive_deprecated_content_types():
     for key in DEPRECATED_CONTENT_TYPE_KEYS:
         dbmod.execute("UPDATE content_types SET archived = 1 WHERE key = ? AND archived = 0", (key,))
+
+
+# One-off rename (Sept): "Full Episode — Portrait Repost" -> "Full YouTube —
+# Portrait Repost". _seed_content_types() only sets a label on INSERT, never
+# on an existing row (so a label Jodie has since customized from Admin >
+# Content Types is never clobbered on redeploy) — only rename it here if it
+# still has exactly the old default label.
+def _migrate_full_repost_label(type_ids):
+    ct_id = type_ids.get("targeted_full_repost")
+    if not ct_id:
+        return
+    dbmod.execute(
+        "UPDATE content_types SET label = ? WHERE id = ? AND label = ?",
+        ("Full YouTube — Portrait Repost", ct_id, "Full Episode — Portrait Repost"),
+    )
+
+
+# "bible_study" was archived long ago under the old flat type list, before
+# Jodie's category restructuring (it used to be in DEPRECATED_CONTENT_TYPE_KEYS
+# above). It's now a first-class row in CONTENT_TYPES again (Sept, per her
+# Ideas-tab request) — _seed_content_types() only relabels/category-updates
+# an existing row, it never un-archives one, so a leftover archived row from
+# an old install needs this explicit nudge back to active.
+def _migrate_reinstate_bible_study(type_ids):
+    ct_id = type_ids.get("bible_study")
+    if not ct_id:
+        return
+    dbmod.execute("UPDATE content_types SET archived = 0 WHERE id = ?", (ct_id,))
 
 
 def _seed_task_templates(type_ids):
