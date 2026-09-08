@@ -124,7 +124,7 @@ CREATION_OPTIONS = [
 # actually completes those two stages.
 # (role_key, task_name, offset_days_before, stage_key)
 PIPELINE_SHOOT_TEMPLATES = [
-    ("admin", "Write script", 21, "script"),
+    ("admin", "Write Instagram Script", 21, "script"),
     ("admin", "Write YouTube script", 21, "script"),
     ("admin", "Concept hashout meeting", 17, "concept"),
     ("production", "Film / record", 12, "film"),
@@ -341,6 +341,7 @@ def seed_data():
     _migrate_opt_in_flat_tasks(type_ids)
     _migrate_full_repost_label(type_ids)
     _migrate_reinstate_bible_study(type_ids)
+    _migrate_write_script_label()
     _seed_opt_in_pipeline_templates(type_ids)
     _seed_creation_options(type_ids)
     user_ids = _seed_users()
@@ -351,6 +352,7 @@ def seed_data():
     filler_created = content_module.fill_weekly_filler_gaps()
     print(f"Auto-filled {len(filler_created)} filler gap-day campaign(s) toward the 4-day-a-week minimum.")
     _showcase_first_campaign()
+    _migrate_sync_all_statuses()
     dbmod.get_db().commit()
 
 
@@ -467,6 +469,37 @@ def _migrate_reinstate_bible_study(type_ids):
     if not ct_id:
         return
     dbmod.execute("UPDATE content_types SET archived = 0 WHERE id = ?", (ct_id,))
+
+
+# One-off rename (Sept, per Jodie): "Write script" -> "Write Instagram
+# Script", for clarity against the separate "Write YouTube script" task.
+# Renames both the template and any already-created tasks sharing the old
+# exact name/stage_key, so a reseed never creates a duplicate task alongside
+# the one that already exists (renamed) for a campaign scheduled before this
+# shipped — same reasoning as _migrate_full_repost_label above.
+def _migrate_write_script_label():
+    dbmod.execute(
+        "UPDATE task_templates SET task_name = ? WHERE task_name = ? AND stage_key = 'script'",
+        ("Write Instagram Script", "Write script"),
+    )
+    dbmod.execute(
+        "UPDATE tasks SET task_name = ? WHERE task_name = ? AND stage_key = 'script'",
+        ("Write Instagram Script", "Write script"),
+    )
+
+
+# Sept: status stopped being manually settable anywhere and is now always
+# derived from real task/stage progress (see app/pipeline.py
+# sync_output_status/sync_campaign_status/mark_output_published). Re-syncs
+# every existing output/campaign so already-scheduled content picks up its
+# correct status immediately on deploy rather than waiting for the next task
+# change to touch it. Safe to re-run every time — sync is a no-op once a
+# row's status is already correct.
+def _migrate_sync_all_statuses():
+    for row in dbmod.rows_to_list(dbmod.query("SELECT id FROM content_outputs")):
+        pipeline.sync_output_status(row["id"])
+    for row in dbmod.rows_to_list(dbmod.query("SELECT id FROM campaigns")):
+        pipeline.sync_campaign_status(row["id"])
 
 
 def _seed_task_templates(type_ids):
