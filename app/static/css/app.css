@@ -150,6 +150,30 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 .legend-group-count { font-weight: 400; color: var(--text-muted); }
 .legend-group-items { display: flex; flex-wrap: wrap; gap: 8px 14px; padding: 8px 2px 4px; }
 
+/* Sept: calendar view filters — "Posting Schedule" plus a per-person
+   Custom Events / Deadlines checkbox (see partials/_calendar_macros.html
+   render_filter_panel and static/js/calendar.js). Purely a client-side
+   show/hide; .cal-filtered-out uses !important so it wins over the
+   .content-card/.list-row/.deadline-pill display rules below regardless of
+   source order. */
+.calendar-filters { margin-bottom: 14px; }
+.calendar-filters-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.calendar-filters-head strong { font-size: 13px; }
+.calendar-filter-groups { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.calendar-filter-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); cursor: pointer; }
+.calendar-filter-item input { margin: 0; }
+.cal-filtered-out { display: none !important; }
+
+/* Pipeline hand-off deadline (edit/audio/design_post — Sept) — a warm,
+   distinct pill so it reads as "something is due", never confused with the
+   grey .meeting-pill (a scheduled meeting) or a colored .content-card
+   (something actually being posted). */
+.deadline-pill {
+  display: block; border-radius: var(--radius-sm); padding: 4px 7px; font-size: 11px;
+  font-weight: 600; line-height: 1.25; color: #6B4A1E; background: #F0C878;
+  margin-top: 4px;
+}
+
 /* ---------------------------------------------------------------- calendar */
 .calendar-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
 .calendar-toolbar .month-label { font-size: 18px; font-weight: 700; min-width: 170px; }
