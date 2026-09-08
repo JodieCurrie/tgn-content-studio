@@ -222,7 +222,7 @@ def scheduling_rule_new():
             int(f.get("interval_days") or 14) if rule_type == "biweekly" else None,
             int(f.get("nth") or 1) if rule_type in ("monthly_nth_weekday", "every_n_months_nth_weekday") else None,
             int(f.get("interval_months") or 3) if rule_type == "every_n_months_nth_weekday" else None,
-            f["anchor_date"], int(f.get("horizon_weeks") or 10), f.get("default_title", ""),
+            f["anchor_date"], int(f.get("horizon_weeks") or 52), f.get("default_title", ""),
         ),
     )
     from .. import scheduling
