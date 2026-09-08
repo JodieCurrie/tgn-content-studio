@@ -219,6 +219,20 @@ function applyCalendarFilters() {
   });
 }
 
+/* Each person collapses into a <summary> pill (see render_filter_panel) —
+   the small dot next to their name is the only hint, while it's closed,
+   that one of their two checkboxes (Custom events / Deadlines) is
+   currently unchecked, so narrowing the calendar down doesn't require
+   opening every person's dropdown just to remember what's hidden. */
+function updateCalFilterBadges() {
+  document.querySelectorAll(".cal-filter-badge").forEach(badge => {
+    const owner = badge.dataset.owner;
+    const ownerChecks = document.querySelectorAll(`.js-cal-filter[data-owner="${owner}"]`);
+    const allChecked = Array.from(ownerChecks).every(cb => cb.checked);
+    badge.hidden = allChecked;
+  });
+}
+
 function initCalendarFilterPanel() {
   const checkboxes = document.querySelectorAll(".js-cal-filter");
   if (!checkboxes.length) return;
@@ -231,6 +245,7 @@ function initCalendarFilterPanel() {
       s[calFilterKey(cb.dataset.cat, cb.dataset.owner)] = cb.checked;
       saveCalFilterState(s);
       applyCalendarFilters();
+      updateCalFilterBadges();
     });
   });
   const selectAllBtn = document.querySelector(".js-cal-filter-all");
@@ -239,6 +254,7 @@ function initCalendarFilterPanel() {
     checkboxes.forEach(cb => { cb.checked = true; s[calFilterKey(cb.dataset.cat, cb.dataset.owner)] = true; });
     saveCalFilterState(s);
     applyCalendarFilters();
+    updateCalFilterBadges();
   });
   const deselectAllBtn = document.querySelector(".js-cal-filter-none");
   deselectAllBtn && deselectAllBtn.addEventListener("click", () => {
@@ -246,7 +262,9 @@ function initCalendarFilterPanel() {
     checkboxes.forEach(cb => { cb.checked = false; s[calFilterKey(cb.dataset.cat, cb.dataset.owner)] = false; });
     saveCalFilterState(s);
     applyCalendarFilters();
+    updateCalFilterBadges();
   });
+  updateCalFilterBadges();
 }
 
 initCalendarFilterPanel();
