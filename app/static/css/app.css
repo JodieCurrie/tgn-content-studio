@@ -225,6 +225,32 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 .status-published, .status-complete { background: #6FAE8A; }
 .status-repurposing { background: #B08BD6; }
 
+/* ---------------------------------------------------------------- stage tracker
+   Planning-Center-style vertical workflow stepper (Sept redesign) — a
+   connecting line down the left with a marker per stage: hollow + grey for
+   what's ahead, orange-ringed for the current stage, filled green with a
+   check for anything done. Shared by the shoot tracker and each output's
+   production tracker in campaign_panel.html. */
+.stage-tracker { position: relative; }
+.stage-step { position: relative; padding: 0 0 14px 26px; }
+.stage-step:last-child { padding-bottom: 0; }
+.stage-step::after {
+  content: ""; position: absolute; left: 7px; top: 18px; bottom: -2px; width: 2px;
+  background: var(--border);
+}
+.stage-step:last-child::after { display: none; }
+.stage-step-marker {
+  position: absolute; left: 0; top: 1px; width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid var(--border); background: var(--surface); display: flex;
+  align-items: center; justify-content: center; font-size: 10px; font-weight: 700;
+  color: var(--surface); line-height: 1;
+}
+.stage-step.is-complete .stage-step-marker { background: var(--success); border-color: var(--success); color: #fff; }
+.stage-step.is-current .stage-step-marker { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.stage-step.is-locked { opacity: 0.45; }
+.stage-step-label { font-size: 13px; font-weight: 700; }
+.stage-step.is-current .stage-step-label { color: var(--accent-dark); }
+
 /* ---------------------------------------------------------------- week view */
 .week-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin-bottom: 22px; }
 .week-day-col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px; min-height: 220px; }
