@@ -52,7 +52,11 @@ panelBackdrop && panelBackdrop.addEventListener("click", closePanel);
 
 document.addEventListener("click", (e) => {
   const opener = e.target.closest(".js-open-campaign, .content-card, .list-row[data-campaign-id]");
-  if (opener && opener.dataset.campaignId) {
+  // Clicking a checkbox (or something else interactive) inside a row that's
+  // ALSO a campaign opener shouldn't also pop the panel open — Tasks tab
+  // rows (Sept redesign) are clickable end-to-end but still need their
+  // "mark complete" checkbox to just toggle, not also navigate away.
+  if (opener && opener.dataset.campaignId && e.target.tagName !== "INPUT") {
     e.preventDefault();
     openCampaignPanel(opener.dataset.campaignId);
   }
@@ -200,21 +204,10 @@ function saveField(el) {
 
 // ---------------------------------------------------------------- tasks
 document.addEventListener("change", (e) => {
-  if (e.target.classList.contains("js-task-status")) {
-    const el = e.target;
-    const previous = el.dataset.prevValue || "not_started";
-    tgnFetch(`/api/tasks/${el.dataset.taskId}`, {
-      method: "PATCH", body: JSON.stringify({ status: el.value }),
-    }).then(() => {
-      el.dataset.prevValue = el.value;
-      if (typeof refreshPipelinePanel === "function") refreshPipelinePanel();
-    }).catch((err) => {
-      // Most likely the pipeline gating rejection (409) — revert the
-      // dropdown rather than leaving it showing a change that didn't save.
-      el.value = previous;
-      alert(err.message);
-    });
-  }
+  // Sept redesign: no more manual multi-value status dropdown anywhere —
+  // a plain checklist item is a single checkbox (done/not done); anything
+  // with real sub-states (scheduled, submitted, approved...) derives that
+  // automatically from the actual pipeline action that happened.
   if (e.target.classList.contains("js-task-complete")) {
     const el = e.target;
     const status = el.checked ? "complete" : "not_started";
