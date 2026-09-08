@@ -17,6 +17,7 @@ from app import create_app, db as dbmod
 from app import scheduling
 from app import pipeline
 from app import task_engine
+from app import content as content_module
 
 
 DEFAULT_PASSWORD = "TGNstudio2026!"
@@ -347,6 +348,8 @@ def seed_data():
     _seed_ideas(user_ids)
     created = scheduling.materialize_all_active_rules()
     print(f"Materialized {len(created)} rule-generated campaigns.")
+    filler_created = content_module.fill_weekly_filler_gaps()
+    print(f"Auto-filled {len(filler_created)} filler gap-day campaign(s) toward the 4-day-a-week minimum.")
     _showcase_first_campaign()
     dbmod.get_db().commit()
 
