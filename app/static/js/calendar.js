@@ -180,3 +180,74 @@ if (calendarSentinel && "IntersectionObserver" in window) {
   }, { rootMargin: "600px 0px 600px 0px" });
   observer.observe(calendarSentinel);
 }
+
+/* Sept: calendar view filters (Month/Week/List) — "Posting Schedule" plus a
+   per-person Custom Events / Deadlines checkbox. Purely client-side: every
+   filterable element on the page carries data-filter-cat (+ data-filter-owner
+   for "custom"/"deadline") from the server, and the checkbox state — which
+   one is which category/owner combination is currently checked — is kept in
+   localStorage so it carries across month/week/list and across visits.
+   Nothing checked in the state object defaults to "shown" (missing key ===
+   visible), which is what lets a brand-new person/category show up already
+   visible instead of silently hidden until someone opts it in. */
+const CAL_FILTER_STORAGE_KEY = "tgn_calendar_filters";
+
+function calFilterKey(cat, owner) {
+  return owner ? `${cat}:${owner}` : cat;
+}
+
+function loadCalFilterState() {
+  try {
+    return JSON.parse(localStorage.getItem(CAL_FILTER_STORAGE_KEY) || "{}");
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveCalFilterState(state) {
+  try {
+    localStorage.setItem(CAL_FILTER_STORAGE_KEY, JSON.stringify(state));
+  } catch (e) { /* private browsing / storage disabled — filters just won't persist */ }
+}
+
+function applyCalendarFilters() {
+  const state = loadCalFilterState();
+  document.querySelectorAll("[data-filter-cat]").forEach(el => {
+    const key = calFilterKey(el.dataset.filterCat, el.dataset.filterOwner);
+    const visible = state[key] !== false;
+    el.classList.toggle("cal-filtered-out", !visible);
+  });
+}
+
+function initCalendarFilterPanel() {
+  const checkboxes = document.querySelectorAll(".js-cal-filter");
+  if (!checkboxes.length) return;
+  const state = loadCalFilterState();
+  checkboxes.forEach(cb => {
+    const key = calFilterKey(cb.dataset.cat, cb.dataset.owner);
+    cb.checked = state[key] !== false;
+    cb.addEventListener("change", () => {
+      const s = loadCalFilterState();
+      s[calFilterKey(cb.dataset.cat, cb.dataset.owner)] = cb.checked;
+      saveCalFilterState(s);
+      applyCalendarFilters();
+    });
+  });
+  const selectAllBtn = document.querySelector(".js-cal-filter-all");
+  selectAllBtn && selectAllBtn.addEventListener("click", () => {
+    const s = loadCalFilterState();
+    checkboxes.forEach(cb => { cb.checked = true; s[calFilterKey(cb.dataset.cat, cb.dataset.owner)] = true; });
+    saveCalFilterState(s);
+    applyCalendarFilters();
+  });
+  const deselectAllBtn = document.querySelector(".js-cal-filter-none");
+  deselectAllBtn && deselectAllBtn.addEventListener("click", () => {
+    const s = loadCalFilterState();
+    checkboxes.forEach(cb => { cb.checked = false; s[calFilterKey(cb.dataset.cat, cb.dataset.owner)] = false; });
+    saveCalFilterState(s);
+    applyCalendarFilters();
+  });
+}
+
+initCalendarFilterPanel();
+applyCalendarFilters();
