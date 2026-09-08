@@ -141,7 +141,10 @@ def update_output(output_id):
     if not content_module.user_can_edit_campaign(g.user, output["campaign_id"]):
         return jsonify({"error": "You don't have permission to edit this."}), 403
     data = request.get_json(force=True)
-    allowed = {"status", "assigned_user_id", "title", "publish_date"}
+    # Sept: status is never hand-set any more (see pipeline.sync_output_status
+    # / mark_output_published) — deliberately left out of the allow-list even
+    # if an old client still sends it.
+    allowed = {"assigned_user_id", "title", "publish_date"}
     fields = {k: v for k, v in data.items() if k in allowed}
     if fields:
         set_clause = ", ".join(f"{k} = ?" for k in fields)
@@ -150,6 +153,22 @@ def update_output(output_id):
         db.execute("DELETE FROM output_platforms WHERE output_id = ?", (output_id,))
         for pid in data["platform_ids"]:
             db.execute("INSERT INTO output_platforms (output_id, platform_id) VALUES (?, ?)", (output_id, pid))
+    return jsonify({"ok": True})
+
+
+@bp.route("/outputs/<int:output_id>/mark-published", methods=["POST"])
+@login_required
+def mark_output_published(output_id):
+    """The one manual status action left anywhere in the app (Sept) — every
+    other status change is derived automatically from real task/stage
+    progress."""
+    forbidden = _admin_only()
+    if forbidden:
+        return forbidden
+    try:
+        pipeline.mark_output_published(output_id, actor_id=g.user["id"])
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify({"ok": True})
 
 

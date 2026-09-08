@@ -253,7 +253,9 @@ def week_view():
     # more than one person by nature.
     tasks_this_week = db.rows_to_list(
         db.query(
-            """SELECT t.*, c.title AS campaign_title, u.name AS assigned_name
+            """SELECT t.*, c.title AS campaign_title, u.name AS assigned_name,
+                      c.concept AS campaign_concept, c.source_idea_id AS campaign_source_idea_id,
+                      c.publish_date AS campaign_publish_date
                FROM tasks t JOIN campaigns c ON c.id = t.campaign_id
                LEFT JOIN users u ON u.id = t.assigned_user_id
                WHERE t.due_date BETWEEN ? AND ? AND t.assigned_user_id = ?
@@ -261,6 +263,10 @@ def week_view():
             (start.isoformat(), end.isoformat(), g.user["id"]),
         )
     )
+    # Sept: same "only the step that actually needs attention" rule as the
+    # Tasks tab — a locked stage's task (or, for Jodie's own tasks, a
+    # not-yet-fleshed-out/too-far-out campaign) shouldn't clutter this list.
+    tasks_this_week = pipeline.filter_visible_tasks(tasks_this_week)
 
     prev_week = (start - timedelta(days=WEEK_VIEW_SPAN_DAYS)).isoformat()
     next_week = (start + timedelta(days=WEEK_VIEW_SPAN_DAYS)).isoformat()
@@ -291,7 +297,9 @@ def list_view():
     )
     overdue_tasks = db.rows_to_list(
         db.query(
-            """SELECT t.*, c.title AS campaign_title, u.name AS assigned_name
+            """SELECT t.*, c.title AS campaign_title, u.name AS assigned_name,
+                      c.concept AS campaign_concept, c.source_idea_id AS campaign_source_idea_id,
+                      c.publish_date AS campaign_publish_date
                FROM tasks t JOIN campaigns c ON c.id = t.campaign_id
                LEFT JOIN users u ON u.id = t.assigned_user_id
                WHERE t.due_date < ? AND t.status != 'complete' ORDER BY t.due_date""",
@@ -300,13 +308,18 @@ def list_view():
     )
     upcoming_tasks = db.rows_to_list(
         db.query(
-            """SELECT t.*, c.title AS campaign_title, u.name AS assigned_name
+            """SELECT t.*, c.title AS campaign_title, u.name AS assigned_name,
+                      c.concept AS campaign_concept, c.source_idea_id AS campaign_source_idea_id,
+                      c.publish_date AS campaign_publish_date
                FROM tasks t JOIN campaigns c ON c.id = t.campaign_id
                LEFT JOIN users u ON u.id = t.assigned_user_id
                WHERE t.due_date BETWEEN ? AND ? AND t.status != 'complete' ORDER BY t.due_date""",
             (today.isoformat(), horizon.isoformat()),
         )
     )
+    # Sept: same visibility rule as the Tasks tab (see week_view above).
+    overdue_tasks = pipeline.filter_visible_tasks(overdue_tasks)
+    upcoming_tasks = pipeline.filter_visible_tasks(upcoming_tasks)
     return render_template(
         "calendar_list.html", upcoming=upcoming, overdue_tasks=overdue_tasks,
         upcoming_tasks=upcoming_tasks, today=today,
