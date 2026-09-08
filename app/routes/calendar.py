@@ -143,6 +143,63 @@ def _meetings_by_day(start, end):
     return by_day
 
 
+# Sept: which pipeline hand-off stages are the ones that already get a real
+# Google Calendar deadline invite for the assignee — see
+# pipeline.confirm_film_with_delivery (edit) and pipeline.assign_and_notify
+# (audio/design_post, create_calendar_invite=True). Highlights is
+# deliberately excluded: pipeline.capture_highlight_candidates hands it off
+# with create_calendar_invite=False since "it isn't a hard deadline the same
+# way" — so it stays out of the new "deadline calendars" layer too.
+DEADLINE_STAGE_KEYS = ("edit", "audio", "design_post")
+
+
+def _deadlines_by_day(start, end):
+    """Pipeline hand-off deadlines (edit/audio/design_post) that already get
+    a Google Calendar invite for whoever they're assigned to — surfaced in
+    the app's own calendar grid for the first time (Sept "deadline
+    calendars" filter; previously these only existed as external Calendar
+    invites and as a task's due_date), keyed by date.
+
+    Sourced from `tasks` rather than `pipeline_stages.delivery_deadline`:
+    confirm_film_with_delivery records the edit hand-off's deadline on the
+    shared `film` stage row (there's no per-output `edit` pipeline_stages
+    row carrying it), but it — like assign_and_notify for audio/design_post —
+    always calls _assign_task, which is what actually sets the task's own
+    due_date/assigned_user_id alongside creating the real Calendar invite.
+    That makes the task row the one place all three hand-offs agree on."""
+    rows = db.rows_to_list(
+        db.query(
+            f"""SELECT t.id AS task_id, t.stage_key, t.due_date AS deadline,
+                       t.assigned_user_id AS owner_id, u.name AS owner_name,
+                       c.id AS campaign_id, c.title AS campaign_title
+               FROM tasks t
+               JOIN content_outputs o ON o.id = t.output_id
+               JOIN campaigns c ON c.id = o.campaign_id
+               LEFT JOIN users u ON u.id = t.assigned_user_id
+               WHERE t.stage_key IN ({','.join('?' for _ in DEADLINE_STAGE_KEYS)})
+                 AND t.due_date IS NOT NULL AND t.assigned_user_id IS NOT NULL
+                 AND t.status != 'complete'
+                 AND t.due_date BETWEEN ? AND ?""",
+            (*DEADLINE_STAGE_KEYS, start.isoformat(), end.isoformat()),
+        )
+    )
+    by_day = {}
+    for r in rows:
+        r["label"] = f"{pipeline.STAGE_BY_KEY[r['stage_key']]['label']} due"
+        by_day.setdefault(r["deadline"][:10], []).append(r)
+    return by_day
+
+
+def _active_users():
+    """For the calendar's per-person view filters (Sept): everyone whose
+    custom events/deadlines could show up, current user first so their own
+    toggles ("My Custom Events" / "My Deadlines") sit at the top."""
+    rows = db.rows_to_list(db.query("SELECT id, name FROM users WHERE active = 1 ORDER BY name"))
+    current_id = g.user["id"] if g.get("user") else None
+    rows.sort(key=lambda u: 0 if u["id"] == current_id else 1)
+    return rows
+
+
 @bp.route("/")
 @bp.route("/calendar")
 @login_required
@@ -163,6 +220,7 @@ def month_view():
     segments = _segment_weeks(weeks)
     by_day = _outputs_by_day(weeks[0][0], weeks[-1][-1])
     meetings_by_day = _meetings_by_day(weeks[0][0], weeks[-1][-1])
+    deadlines_by_day = _deadlines_by_day(weeks[0][0], weeks[-1][-1])
     next_from = weeks[-1][0] + timedelta(days=7)
 
     legend_types = db.rows_to_list(
@@ -172,12 +230,14 @@ def month_view():
 
     return render_template(
         "calendar_month.html",
-        segments=segments, by_day=by_day, meetings_by_day=meetings_by_day, today=today,
+        segments=segments, by_day=by_day, meetings_by_day=meetings_by_day,
+        deadlines_by_day=deadlines_by_day, today=today,
         jump_year=year, jump_month=month,
         next_from=next_from.isoformat(),
         cont_year=segments[-1]["year"], cont_month=segments[-1]["month"],
         weekday_headers=WEEKDAY_HEADERS,
         legend_groups=legend_groups,
+        filter_users=_active_users(), current_user_id=g.user["id"],
     )
 
 
@@ -209,10 +269,12 @@ def month_fragment():
     segments = _segment_weeks(weeks, continues_year=cont_year, continues_month=cont_month)
     by_day = _outputs_by_day(weeks[0][0], weeks[-1][-1])
     meetings_by_day = _meetings_by_day(weeks[0][0], weeks[-1][-1])
+    deadlines_by_day = _deadlines_by_day(weeks[0][0], weeks[-1][-1])
 
     return render_template(
         "partials/calendar_month_fragment.html",
-        segments=segments, by_day=by_day, meetings_by_day=meetings_by_day, today=date.today(),
+        segments=segments, by_day=by_day, meetings_by_day=meetings_by_day,
+        deadlines_by_day=deadlines_by_day, today=date.today(),
     )
 
 
@@ -230,6 +292,7 @@ def week_view():
     days = [start + timedelta(days=i) for i in range(WEEK_VIEW_SPAN_DAYS)]
     by_day = _outputs_by_day(start, end)
     meetings_by_day = _meetings_by_day(start, end)
+    deadlines_by_day = _deadlines_by_day(start, end)
     # A flat "Meetings this week" list (same data as meetings_by_day,
     # flattened + sorted) so every participant sees it when they open the
     # week, the same way "Tasks due this week" already isn't scoped to any
@@ -273,9 +336,11 @@ def week_view():
 
     return render_template(
         "calendar_week.html", days=days, by_day=by_day, meetings_by_day=meetings_by_day,
+        deadlines_by_day=deadlines_by_day,
         meetings_this_week=meetings_this_week, start=start, end=end,
         today=today, tasks_this_week=tasks_this_week,
         prev_week=prev_week, next_week=next_week,
+        filter_users=_active_users(), current_user_id=g.user["id"],
     )
 
 
@@ -287,7 +352,8 @@ def list_view():
     upcoming = db.rows_to_list(
         db.query(
             """SELECT o.id AS output_id, o.publish_date, o.status, c.id AS campaign_id, c.title,
-                      ct.label AS type_label, ct.color AS type_color, u.name AS assigned_name
+                      ct.key AS type_key, ct.label AS type_label, ct.color AS type_color,
+                      u.name AS assigned_name, u.id AS assigned_user_id
                FROM content_outputs o JOIN campaigns c ON c.id = o.campaign_id
                JOIN content_types ct ON ct.id = o.content_type_id
                LEFT JOIN users u ON u.id = o.assigned_user_id
@@ -323,6 +389,8 @@ def list_view():
     return render_template(
         "calendar_list.html", upcoming=upcoming, overdue_tasks=overdue_tasks,
         upcoming_tasks=upcoming_tasks, today=today,
+        deadline_stage_keys=DEADLINE_STAGE_KEYS,
+        filter_users=_active_users(), current_user_id=g.user["id"],
     )
 
 
