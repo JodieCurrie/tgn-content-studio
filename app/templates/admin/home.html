@@ -15,4 +15,23 @@
     <button class="btn btn-primary" type="submit">Sync pipeline &amp; reference data</button>
   </form>
 </div>
+
+<div class="card" style="margin-top:24px; border:1px solid #e0968a55; background:#e0968a0d;">
+  <h3 style="margin-top:0; color:#b5493a;">⚠️ Danger zone — reset test data</h3>
+  <p class="page-subtitle" style="margin-top:4px;">
+    Permanently clears every scheduled post on the calendar and every idea in the bank, so you can start fresh with
+    your own content. Content types, task templates, scheduling rules, and users are left exactly as configured —
+    and since scheduling rules keep running, they'll immediately generate fresh upcoming posts to fill the calendar
+    back in. <strong>This can't be undone.</strong>
+  </p>
+  <form method="POST" action="{{ url_for('admin.reset_test_data') }}"
+        onsubmit="return confirm('This will permanently delete every scheduled post and every idea. Continue?');"
+        style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <label style="display:flex; flex-direction:column; gap:2px; font-size:13px;">
+      Type <strong>RESET</strong> to confirm
+      <input class="field-input" type="text" name="confirm_phrase" placeholder="RESET" autocomplete="off" required style="max-width:160px;">
+    </label>
+    <button class="btn" type="submit" style="background:#b5493a; color:#fff; align-self:flex-end;">Clear calendar &amp; ideas</button>
+  </form>
+</div>
 {% endblock %}
