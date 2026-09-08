@@ -117,6 +117,170 @@ def idea_notes_with_links(idea):
     return f"{notes}\n\n{links_block}" if notes else links_block
 
 
+# ---------------------------------------------------------------------------
+# Weekly filler gap-fill (Sept). Jodie's posting-frequency target is measured
+# in DAYS, not raw post count: "3-4 posts a week" really meant "post on a
+# minimum of 4 different days a week" — two posts landing on the same day
+# (usually the same content re-cut for a second platform) still only count
+# as one posting day. Monthly + Targeted scheduling rules already cover some
+# days each week on their own rhythm; this tops up every week in the horizon
+# with extra Filler posts on weekdays that don't already have anything,
+# spread out between the days that do, until each week hits the minimum.
+# Runs wherever the recurring-rule horizon already gets materialized (see
+# scripts/seed.py and admin.py's scheduling-rule routes) since there's no
+# background scheduler on Render's free tier to run it on its own.
+# ---------------------------------------------------------------------------
+MIN_POSTING_DAYS_PER_WEEK = 4
+
+# The two "needs a source clip already in hand" filler types stay out of
+# auto-fill, same as they're excluded from every recurring scheduling rule
+# (see IDEA_REQUIRES_LINK_TYPE_KEYS above) — they only ever reach the
+# calendar via a matching idea that already carries a link.
+FILLER_AUTOFILL_EXCLUDED_TYPE_KEYS = IDEA_REQUIRES_LINK_TYPE_KEYS
+
+
+def posting_days_in_range(start, end):
+    """The set of ISO dates in [start, end] that already have at least one
+    campaign scheduled — the unit Jodie actually cares about. Two outputs
+    sharing a campaign (e.g. a Short + its YouTube companion) share one
+    publish_date, so they naturally count as a single posting day here."""
+    rows = db.query(
+        "SELECT DISTINCT publish_date FROM campaigns WHERE publish_date BETWEEN ? AND ?",
+        (start.isoformat(), end.isoformat()),
+    )
+    return {r["publish_date"] for r in rows}
+
+
+def _eligible_autofill_filler_types():
+    types = db.rows_to_list(
+        db.query("SELECT * FROM content_types WHERE is_filler = 1 AND archived = 0 ORDER BY sort_order")
+    )
+    return [t for t in types if t["key"] not in FILLER_AUTOFILL_EXCLUDED_TYPE_KEYS]
+
+
+def _pick_filler_type_for_gap(used_type_ids_this_week):
+    """Prefer a filler type not already used this week; among those, prefer
+    whichever hasn't been scheduled in the longest time, for variety."""
+    types = _eligible_autofill_filler_types()
+    if not types:
+        return None
+    fresh = [t for t in types if t["id"] not in used_type_ids_this_week]
+    pool = fresh or types
+
+    def _last_used(t):
+        row = db.query_one(
+            "SELECT MAX(publish_date) AS d FROM campaigns WHERE primary_content_type_id = ?", (t["id"],)
+        )
+        return row["d"] or ""
+
+    pool.sort(key=_last_used)
+    return pool[0]
+
+
+def _weekday_gap_candidates(week_start, week_end, today, existing_days):
+    """Weekdays (Mon-Fri) in this week that are today or later and don't
+    already have something scheduled. Weekends are never used for
+    auto-fill, and a day already in the past can't be scheduled into."""
+    candidates = []
+    d = week_start
+    while d <= week_end:
+        if d.weekday() < 5 and d >= today and d.isoformat() not in existing_days:
+            candidates.append(d)
+        d += timedelta(days=1)
+    return candidates
+
+
+def _spread_pick(candidates, count):
+    """Choose `count` days out of the sorted `candidates`, spread evenly
+    across the list rather than clustered at one end — so a new filler post
+    lands *between* the days that already have content instead of piling up
+    at the start or end of the week."""
+    if count <= 0 or not candidates:
+        return []
+    if count >= len(candidates):
+        return list(candidates)
+    step = len(candidates) / count
+    picked, used_idx = [], set()
+    for i in range(count):
+        idx = min(int(i * step), len(candidates) - 1)
+        while idx in used_idx and idx < len(candidates) - 1:
+            idx += 1
+        used_idx.add(idx)
+        picked.append(candidates[idx])
+    return picked
+
+
+def _create_autofill_filler_campaign(ct, publish_date_iso, idea=None):
+    title = idea["title"] if idea else ct["label"]
+    notes = idea_notes_with_links(idea) if idea else ""
+    campaign_id = db.execute(
+        """INSERT INTO campaigns
+           (title, notes, publish_date, status, primary_content_type_id,
+            schedule_origin, source_idea_id, created_at, updated_at)
+           VALUES (?, ?, ?, 'planned', ?, 'manual', ?, datetime('now'), datetime('now'))""",
+        (title, notes, publish_date_iso, ct["id"], idea["id"] if idea else None),
+    )
+    if idea:
+        db.execute("UPDATE content_ideas SET scheduled_campaign_id = ? WHERE id = ?", (campaign_id, idea["id"]))
+    add_output(campaign_id, ct["id"], publish_date_iso)
+    task_engine.generate_tasks_for_campaign(campaign_id)
+    _spawn_paired_and_followup_content(campaign_id, ct, publish_date_iso)
+    db.execute(
+        "INSERT INTO activity_log (campaign_id, actor_id, message) VALUES (?, NULL, ?)",
+        (campaign_id, "Auto-scheduled to fill a gap day toward the 4-day-a-week posting minimum."),
+    )
+    return campaign_id
+
+
+def _fill_gap_days_for_week(week_start, week_end, today):
+    existing_days = posting_days_in_range(week_start, week_end)
+    needed = MIN_POSTING_DAYS_PER_WEEK - len(existing_days)
+    if needed <= 0:
+        return []
+
+    candidates = _weekday_gap_candidates(week_start, week_end, today, existing_days)
+    if not candidates:
+        return []  # nothing left this week to schedule into — already past, or weekends only
+
+    chosen_days = _spread_pick(candidates, min(needed, len(candidates)))
+
+    used_type_ids_this_week = {
+        r["primary_content_type_id"]
+        for r in db.query(
+            "SELECT primary_content_type_id FROM campaigns WHERE publish_date BETWEEN ? AND ?",
+            (week_start.isoformat(), week_end.isoformat()),
+        )
+        if r["primary_content_type_id"]
+    }
+
+    created = []
+    for day in chosen_days:
+        ct = _pick_filler_type_for_gap(used_type_ids_this_week)
+        if not ct:
+            break
+        idea = _oldest_matching_idea(ct)
+        campaign_id = _create_autofill_filler_campaign(ct, day.isoformat(), idea)
+        created.append(campaign_id)
+        used_type_ids_this_week.add(ct["id"])
+    return created
+
+
+def fill_weekly_filler_gaps(today=None, horizon_weeks=10):
+    """Tops up every week from the current one through the horizon with
+    extra Filler posts so each week hits MIN_POSTING_DAYS_PER_WEEK posting
+    days. Safe to call repeatedly — a week that already has enough posting
+    days, or a day that already has something scheduled, is left alone."""
+    today = today or date.today()
+    week_start = today - timedelta(days=today.weekday())
+    horizon_end = today + timedelta(days=7 * horizon_weeks)
+    created = []
+    while week_start <= horizon_end:
+        week_end = week_start + timedelta(days=6)
+        created.extend(_fill_gap_days_for_week(week_start, week_end, today))
+        week_start += timedelta(days=7)
+    return created
+
+
 def _spawn_paired_and_followup_content(campaign_id, ct, publish_date_iso, actor_id=None):
     """The auto-pairing/follow-up rules that apply regardless of whether the
     campaign came from a recurring rule or a manual quick-create — kept in

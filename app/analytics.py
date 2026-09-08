@@ -2,13 +2,20 @@
 Content balance tracking + smart scheduling warnings/filler suggestions
 (Parts 27-29). These are advisory only — nothing here blocks or auto-edits
 anything; they just compute numbers and hand back plain-language notes.
+
+Sept: Jodie's posting-frequency target is measured in DAYS a week, not raw
+post count — two posts on the same day (usually a second-platform cut of
+the same content) count as one posting day. See
+content.MIN_POSTING_DAYS_PER_WEEK, which content.fill_weekly_filler_gaps()
+actually schedules extra Filler posts against (run wherever the recurring
+horizon gets materialized). suggest_filler() below is only what's left to
+say for a week that pass hasn't caught up to yet.
 """
 from datetime import date, timedelta
 
 from . import db
+from . import content as content_module
 
-MIN_POSTS_PER_WEEK = 3
-IDEAL_POSTS_PER_WEEK = 4
 VIDEO_TYPE_KEYS = {
     "targeted_short", "targeted_long", "highlight_1", "highlight_2", "targeted_full_repost",
     "moving_scripture", "tiktok_style", "quick_reel", "scripture_expansion",
@@ -45,24 +52,25 @@ def content_mix(start, end):
 
 def warnings_for_week(anchor=None):
     start, end = week_bounds(anchor)
-    rows = outputs_in_range(start, end)
-    total = len(rows)
+    days = content_module.posting_days_in_range(start, end)
+    day_count = len(days)
+    target = content_module.MIN_POSTING_DAYS_PER_WEEK
     warnings = []
 
-    if total < MIN_POSTS_PER_WEEK:
+    if day_count < target:
         warnings.append({
             "level": "warning",
-            "text": f"Only {total} post{'s' if total != 1 else ''} scheduled this week — your minimum target is {MIN_POSTS_PER_WEEK}.",
-        })
-    elif total < IDEAL_POSTS_PER_WEEK:
-        warnings.append({
-            "level": "info",
-            "text": f"{total} posts scheduled this week — one more would hit your ideal target of {IDEAL_POSTS_PER_WEEK}.",
+            "text": f"Only {day_count} posting day{'s' if day_count != 1 else ''} scheduled this week — "
+                    f"your minimum is {target} days a week. Run a data sync from Admin to auto-fill the rest with filler.",
         })
     else:
-        warnings.append({"level": "success", "text": f"{total} posts scheduled this week — target met."})
+        warnings.append({
+            "level": "success",
+            "text": f"{day_count} posting days scheduled this week — your {target}-day minimum is met.",
+        })
 
     # consecutive same-family (video) warning, in publish-date order
+    rows = outputs_in_range(start, end)
     streak = 0
     max_streak = 0
     for r in rows:
@@ -95,16 +103,21 @@ def warnings_for_week(anchor=None):
 
 
 def suggest_filler(anchor=None, limit=3):
+    """Advisory-only fallback for the dashboard: content.fill_weekly_filler_gaps()
+    is what actually schedules gap-filling posts (on data sync), so this
+    only has something to say when a week is still short — e.g. before a
+    sync has run, or the horizon ran out of weekday slots to use."""
     start, end = week_bounds(anchor)
-    rows = outputs_in_range(start, end)
-    total = len(rows)
-    if total >= IDEAL_POSTS_PER_WEEK:
+    days = content_module.posting_days_in_range(start, end)
+    if len(days) >= content_module.MIN_POSTING_DAYS_PER_WEEK:
         return []
 
+    rows = outputs_in_range(start, end)
     used_keys = {r["type_key"] for r in rows}
     filler_types = db.rows_to_list(
         db.query("SELECT * FROM content_types WHERE is_filler = 1 AND archived = 0 ORDER BY sort_order")
     )
+    filler_types = [ft for ft in filler_types if ft["key"] not in content_module.FILLER_AUTOFILL_EXCLUDED_TYPE_KEYS]
     # prefer filler types not already used this week, and de-prioritise video
     # if there's already a lot of video in the mix
     video_count = sum(1 for r in rows if r["type_key"] in VIDEO_TYPE_KEYS)
@@ -160,6 +173,7 @@ def home_summary(user=None):
         "week_start": start,
         "week_end": end,
         "posts_total": len(rows),
+        "posting_days_total": len(content_module.posting_days_in_range(start, end)),
         "posts_published": published,
         "posts_upcoming": upcoming,
         "tasks_due_count": len(tasks_due),
