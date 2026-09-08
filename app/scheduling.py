@@ -189,6 +189,50 @@ def materialize_all_active_rules():
     return total
 
 
+# Sept: materialize_rule()'s horizon_end is always "whenever this ran" plus
+# the rule's horizon_weeks — so a rule with a 10-16 week horizon quietly
+# stops producing new campaigns once that many weeks have passed since the
+# last time someone actually re-ran it (materialize_all_active_rules /
+# fill_weekly_filler_gaps only fire from seed_data() or the Admin "Sync
+# pipeline & reference data" button — nothing re-runs them on its own).
+# Jodie caught Monthly/Filler content stopping in November because of
+# exactly this: the horizon was last rolled forward whenever that button (or
+# a deploy's seed_data()) last ran, and every week since then that nobody
+# clicked it, the visible window got one week shorter without her noticing.
+#
+# HORIZON_REFRESH_HOURS keeps it rolling on its own, the same "no
+# scheduler/worker process, so check cheaply on request instead" pattern as
+# app/auth.py's pipeline-confirmation check: app_state.horizon_synced_at
+# records the last time this actually ran (not every request — most calls
+# short-circuit on that one cheap SELECT), and once it's stale the full
+# rule + filler-gap materialization runs and the timestamp is bumped. Safe
+# to call on every request: both underlying functions are idempotent.
+HORIZON_REFRESH_HOURS = 20
+
+
+def ensure_horizon_rolled_forward():
+    from datetime import datetime
+    row = db.query_one("SELECT value FROM app_state WHERE key = 'horizon_synced_at'")
+    if row:
+        try:
+            last_synced = datetime.fromisoformat(row["value"])
+            if (datetime.utcnow() - last_synced).total_seconds() < HORIZON_REFRESH_HOURS * 3600:
+                return
+        except ValueError:
+            pass  # malformed value — treat as never synced, fall through and re-sync
+
+    materialize_all_active_rules()
+    from . import content as content_module
+    content_module.fill_weekly_filler_gaps()
+
+    now_iso = datetime.utcnow().isoformat()
+    db.execute(
+        """INSERT INTO app_state (key, value, updated_at) VALUES ('horizon_synced_at', ?, datetime('now'))
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')""",
+        (now_iso,),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Drag-and-drop resolution
 # ---------------------------------------------------------------------------

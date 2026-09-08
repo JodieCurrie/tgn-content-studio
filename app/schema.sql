@@ -342,6 +342,20 @@ CREATE TABLE IF NOT EXISTS integration_credentials (
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- ---------------------------------------------------------------------------
+-- App state — tiny generic key/value table for background-ish bookkeeping
+-- that isn't tied to any one user or record. First use (Sept): remembering
+-- when the recurring-schedule/filler-gap rolling horizon was last extended,
+-- since this app has no scheduler/worker process (same reasoning as the
+-- pipeline-confirmation check in app/auth.py) — see
+-- scheduling.ensure_horizon_rolled_forward().
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS app_state (
+    key             TEXT PRIMARY KEY,
+    value           TEXT NOT NULL,
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_campaigns_publish_date ON campaigns(publish_date);
 CREATE INDEX IF NOT EXISTS idx_outputs_campaign ON content_outputs(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_outputs_publish_date ON content_outputs(publish_date);

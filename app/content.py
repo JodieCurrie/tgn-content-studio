@@ -324,11 +324,14 @@ def _spawn_targeted_followups(parent_campaign_id, parent_publish_iso, actor_id=N
     # Highlight/Snippet 1 & 2 land on the Monday and Friday of the following
     # week (offsets +5 and +9 days from a Wednesday anchor); the portrait
     # "full episode" repost lands the Monday after that — before the next
-    # targeted campaign begins on a 14-day cycle (offset +11).
+    # targeted campaign begins on a 14-day cycle (offset +12; Wed+12 = Mon,
+    # not +11 which lands on the Sunday before it — fixed Sept after Jodie
+    # caught it landing on the wrong day. See scripts/seed.py
+    # _migrate_full_repost_offset for already-scheduled campaigns.)
     followups = (
         (5, "highlight_1", "Highlight/Snippet 1"),
         (9, "highlight_2", "Highlight/Snippet 2"),
-        (11, "targeted_full_repost", "Full YouTube — Portrait Repost"),
+        (12, "targeted_full_repost", "Full YouTube — Portrait Repost"),
     )
     for offset, type_key, label in followups:
         ct = get_content_type_by_key(type_key)
@@ -589,6 +592,26 @@ def _maybe_release_idea_back_to_pool(idea_id, campaign_id, new_title):
 
 def delete_campaign(campaign_id):
     db.execute("DELETE FROM campaigns WHERE id = ?", (campaign_id,))
+
+
+# Admin "Reset test data" action (Sept, per Jodie): she wanted a genuinely
+# blank calendar to test against with her own content instead of the demo
+# ideas/campaigns this app ships with. Wipes every campaign (and everything
+# that hangs off one — outputs, tasks, pipeline stages, activity log,
+# comments, assets, inspiration links, all via the ON DELETE CASCADE chain
+# on campaigns.id, the same mechanism delete_campaign above relies on) and
+# every idea in the bank, while leaving the underlying structure (content
+# types, task templates, scheduling rules, creation options, users, roles)
+# exactly as configured. She chose to leave scheduling rules active rather
+# than pause them, so this also forces an immediate re-materialization —
+# clearing app_state's horizon_synced_at and calling
+# scheduling.ensure_horizon_rolled_forward() — instead of leaving the
+# calendar sitting empty until the next automatic horizon check.
+def reset_all_scheduled_content():
+    db.execute("DELETE FROM campaigns")
+    db.execute("DELETE FROM content_ideas")
+    db.execute("DELETE FROM app_state WHERE key = 'horizon_synced_at'")
+    scheduling.ensure_horizon_rolled_forward()
 
 
 def add_inspiration_link(campaign_id, url, label=""):

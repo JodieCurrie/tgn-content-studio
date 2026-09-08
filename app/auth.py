@@ -4,6 +4,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import db
 from . import pipeline
+from . import scheduling
 
 bp = Blueprint("auth", __name__)
 
@@ -35,6 +36,13 @@ def load_logged_in_user():
             g.pending_pipeline_confirmations = pipeline.pending_confirmations_for_admin()
         else:
             g.pending_pipeline_confirmations = []
+        # Sept: keeps the recurring-schedule/filler-gap rolling horizon
+        # extending on its own instead of quietly stalling weeks after
+        # whoever last clicked Admin > "Sync pipeline & reference data" —
+        # see scheduling.ensure_horizon_rolled_forward for why. Cheap on
+        # every request but for the one day it actually re-syncs.
+        if g.user:
+            scheduling.ensure_horizon_rolled_forward()
 
 
 def login_required(view):
