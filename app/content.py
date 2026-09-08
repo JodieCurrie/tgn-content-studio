@@ -94,7 +94,13 @@ IDEA_REQUIRES_LINK_TYPE_KEYS = ("preaching_teaching", "podcast_additional_highli
 
 
 def _oldest_matching_idea(ct):
-    if ct["category_key"] not in ("monthly", "filler"):
+    # Sept, per Jodie: keep auto-scheduling pulling from the Ideas bank as
+    # the horizon rolls forward indefinitely, not just for Monthly/Filler —
+    # her Targeted video topics live in the Ideas tab too (tagged with a
+    # Targeted content type), so a newly materialized Targeted slot should
+    # use one of those instead of the generic "New Targeted Campaign"
+    # placeholder whenever a matching idea is waiting.
+    if ct["category_key"] not in ("monthly", "filler", "targeted"):
         return None
     idea = db.row_to_dict(db.query_one(
         """SELECT * FROM content_ideas WHERE content_type_id = ? AND scheduled_campaign_id IS NULL
@@ -265,11 +271,19 @@ def _fill_gap_days_for_week(week_start, week_end, today):
     return created
 
 
-def fill_weekly_filler_gaps(today=None, horizon_weeks=10):
+def fill_weekly_filler_gaps(today=None, horizon_weeks=52):
     """Tops up every week from the current one through the horizon with
     extra Filler posts so each week hits MIN_POSTING_DAYS_PER_WEEK posting
     days. Safe to call repeatedly — a week that already has enough posting
-    days, or a day that already has something scheduled, is left alone."""
+    days, or a day that already has something scheduled, is left alone.
+
+    horizon_weeks defaults to a full year (Sept, per Jodie: the posting
+    rhythm itself should keep auto-scheduling indefinitely, not stop after
+    a short lookout window — only the task lists get a short 3-month
+    declutter, see pipeline.DECLUTTER_MONTHS_AHEAD). Combined with
+    scheduling.ensure_horizon_rolled_forward() re-running this on its own
+    every HORIZON_REFRESH_HOURS, the visible year-ahead window keeps
+    rolling forward day by day rather than ever going stale again."""
     today = today or date.today()
     week_start = today - timedelta(days=today.weekday())
     horizon_end = today + timedelta(days=7 * horizon_weeks)
