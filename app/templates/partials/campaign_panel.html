@@ -15,11 +15,7 @@
     <div class="form-grid">
       <div>
         <label class="field-label">Status</label>
-        <select class="field-select js-autosave" data-campaign-id="{{ c.id }}" data-field="status">
-          {% for s in ['idea','planned','concept_script','to_film','editing','awaiting_review','changes_requested','approved','scheduled','published','repurposing','complete'] %}
-          <option value="{{ s }}" {{ 'selected' if c.status == s }}>{{ s|status_label }}</option>
-          {% endfor %}
-        </select>
+        <div><span class="pill status-{{ c.status }}">{{ c.status|status_label }}</span></div>
       </div>
       <div>
         <label class="field-label">Publish date</label>
@@ -39,7 +35,7 @@
      Short and YouTube outputs at once — so this renders a single time
      above the per-output trackers, not once per output. #}
   <div class="panel-section">
-    <h4>The shoot</h4>
+    <h4>Workflow</h4>
     <div class="stage-tracker">
     {% set shoot_ns = namespace(found_current=false) %}
     {% for stage in c.shoot_stages %}
@@ -116,12 +112,11 @@
       <div style="margin-top:6px; font-size:12.5px; color:var(--text-muted);">
         {% for p in o.platforms %}<span class="pill" style="margin-right:4px;">{{ p.label }}</span>{% endfor %}
       </div>
-      <div style="margin-top:6px;">
-        <select class="field-select js-output-status" data-output-id="{{ o.id }}" style="width:auto; display:inline-block;">
-          {% for s in ['idea','planned','concept_script','to_film','editing','awaiting_review','changes_requested','approved','scheduled','published','complete'] %}
-          <option value="{{ s }}" {{ 'selected' if o.status == s }}>{{ s|status_label }}</option>
-          {% endfor %}
-        </select>
+      <div style="margin-top:6px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+        <span class="pill status-{{ o.status }}">{{ o.status|status_label }}</span>
+        {% if o.status == 'scheduled' and (current_user.role_is_admin or current_user.role_can_manage_all_content) %}
+        <button type="button" class="btn btn-sm btn-primary js-mark-published" data-output-id="{{ o.id }}">✅ Mark as Published</button>
+        {% endif %}
         {% if o.assigned_name %}<span class="page-subtitle">Assigned: {{ o.assigned_name }}</span>{% endif %}
       </div>
 
