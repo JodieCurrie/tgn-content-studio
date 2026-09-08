@@ -340,6 +340,7 @@ def seed_data():
     _migrate_targeted_video_pipeline(type_ids)
     _migrate_opt_in_flat_tasks(type_ids)
     _migrate_full_repost_label(type_ids)
+    _migrate_full_repost_offset(type_ids)
     _migrate_reinstate_bible_study(type_ids)
     _migrate_write_script_label()
     _seed_opt_in_pipeline_templates(type_ids)
@@ -456,6 +457,48 @@ def _migrate_full_repost_label(type_ids):
         "UPDATE content_types SET label = ? WHERE id = ? AND label = ?",
         ("Full YouTube — Portrait Repost", ct_id, "Full Episode — Portrait Repost"),
     )
+
+
+# One-off date fix (Sept, per Jodie): the portrait "full episode" repost was
+# spawned at a +11-day offset from its parent Targeted campaign, which lands
+# on the Sunday before the intended Monday (the parent always anchors on a
+# Wednesday — see _upsert_rule's "Targeted Campaign — biweekly Wednesday" —
+# and Wed+11 is a Sunday, Wed+12 is the Monday that was actually intended).
+# app/content.py's _spawn_targeted_followups now uses +12 for anything
+# created from here on; this shifts every already-scheduled repost (found by
+# its still-11 dependency_offset_days fingerprint) forward by a day, along
+# with its content_outputs row and any not-yet-worked task due dates, so
+# reseeding a pre-fix install doesn't leave old campaigns stuck on the wrong
+# weekday. Safe to re-run: once shifted, dependency_offset_days is 12 and the
+# WHERE clause no longer matches it.
+def _migrate_full_repost_offset(type_ids):
+    ct_id = type_ids.get("targeted_full_repost")
+    if not ct_id:
+        return
+    stale = dbmod.rows_to_list(
+        dbmod.query(
+            "SELECT id, publish_date FROM campaigns WHERE primary_content_type_id = ? AND dependency_offset_days = 11",
+            (ct_id,),
+        )
+    )
+    for c in stale:
+        new_date = (date.fromisoformat(c["publish_date"]) + timedelta(days=1)).isoformat()
+        dbmod.execute(
+            "UPDATE campaigns SET publish_date = ?, dependency_offset_days = 12 WHERE id = ?",
+            (new_date, c["id"]),
+        )
+        dbmod.execute(
+            "UPDATE content_outputs SET publish_date = ? WHERE campaign_id = ?",
+            (new_date, c["id"]),
+        )
+        # Only shift tasks nobody's touched yet, same rule every other
+        # migration here follows — a task already in progress or completed
+        # keeps the date it was actually worked against.
+        dbmod.execute(
+            """UPDATE tasks SET due_date = date(due_date, '+1 day')
+               WHERE campaign_id = ? AND status = 'not_started' AND created_from_template = 1""",
+            (c["id"],),
+        )
 
 
 # "bible_study" was archived long ago under the old flat type list, before
