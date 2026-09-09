@@ -271,6 +271,124 @@ def _fill_gap_days_for_week(week_start, week_end, today):
     return created
 
 
+def week_start_for(iso_date):
+    d = date.fromisoformat(iso_date) if isinstance(iso_date, str) else iso_date
+    return d - timedelta(days=d.weekday())
+
+
+def weeks_between(start_date, end_date):
+    """Monday week-start dates from start_date's week through end_date's
+    week, inclusive. `start_date`/`end_date` may be ISO strings or date
+    objects."""
+    if isinstance(start_date, str):
+        start_date = date.fromisoformat(start_date)
+    if isinstance(end_date, str):
+        end_date = date.fromisoformat(end_date)
+    cursor = week_start_for(start_date)
+    end_week = week_start_for(end_date)
+    weeks = []
+    while cursor <= end_week:
+        weeks.append(cursor)
+        cursor += timedelta(days=7)
+    return weeks
+
+
+def _find_surplus_filler_campaign(deficit_week_start, today, horizon_weeks=52):
+    """Looks for an already-scheduled Filler campaign that can be relocated
+    to backfill `deficit_week_start` — i.e. one sitting in a week that
+    currently has MORE than MIN_POSTING_DAYS_PER_WEEK posting days, so
+    pulling it out still leaves that week at the minimum. Searches outward
+    from the deficit week (this week, then +/-1 week, +/-2 weeks, ...) so
+    whichever post moves travels the shortest distance — least disruption to
+    the rest of the schedule. `horizon_weeks` bounds how far outward from the
+    deficit week itself the search goes — NOT how far from today, since the
+    deficit week can legitimately sit far in the future (e.g. after a
+    scheduling-rule shift) and still needs its own nearby weeks searched."""
+    offsets = [0]
+    for step in range(1, horizon_weeks + 2):
+        offsets.append(7 * step)
+        offsets.append(-7 * step)
+
+    for off in offsets:
+        week_start = deficit_week_start + timedelta(days=off)
+        week_end = week_start + timedelta(days=6)
+        if len(posting_days_in_range(week_start, week_end)) <= MIN_POSTING_DAYS_PER_WEEK:
+            continue  # no surplus in this week
+        filler = db.query_one(
+            """SELECT c.id, c.publish_date FROM campaigns c
+               JOIN content_types ct ON ct.id = c.primary_content_type_id
+               WHERE ct.category_key = 'filler' AND c.publish_date BETWEEN ? AND ? AND c.publish_date >= ?
+               ORDER BY c.publish_date DESC LIMIT 1""",
+            (week_start.isoformat(), week_end.isoformat(), today.isoformat()),
+        )
+        if filler:
+            return db.row_to_dict(filler)
+    return None
+
+
+def _rebalance_week(week_start, today, actor_id=None, reason=""):
+    """Tops one week back up to MIN_POSTING_DAYS_PER_WEEK, preferring to
+    relocate an existing Filler post from a week that has more than it needs
+    before ever creating new filler content (see rebalance_filler_for_weeks)."""
+    week_end = week_start + timedelta(days=6)
+    existing_days = posting_days_in_range(week_start, week_end)
+    needed = MIN_POSTING_DAYS_PER_WEEK - len(existing_days)
+    if needed <= 0:
+        return []
+
+    candidates = _weekday_gap_candidates(week_start, week_end, today, existing_days)
+    if not candidates:
+        return []  # nothing left this week to schedule into
+
+    chosen_days = _spread_pick(candidates, min(needed, len(candidates)))
+    moved = []
+    for day in chosen_days:
+        source = _find_surplus_filler_campaign(week_start, today)
+        if source:
+            old_date = source["publish_date"]
+            scheduling.move_campaign_to_date(source["id"], day.isoformat())
+            db.execute(
+                "INSERT INTO activity_log (campaign_id, actor_id, message) VALUES (?, ?, ?)",
+                (
+                    source["id"], actor_id,
+                    f"Rescheduled from {old_date} to {day.isoformat()} to keep this week at the "
+                    f"{MIN_POSTING_DAYS_PER_WEEK}-post minimum{reason}.",
+                ),
+            )
+            moved.append(source["id"])
+        else:
+            # nothing anywhere in the horizon to borrow — fall back to
+            # creating a fresh filler post, same as fill_weekly_filler_gaps.
+            used_type_ids = {
+                r["primary_content_type_id"]
+                for r in db.query(
+                    "SELECT primary_content_type_id FROM campaigns WHERE publish_date BETWEEN ? AND ?",
+                    (week_start.isoformat(), week_end.isoformat()),
+                )
+                if r["primary_content_type_id"]
+            }
+            ct = _pick_filler_type_for_gap(used_type_ids)
+            if not ct:
+                continue
+            idea = _oldest_matching_idea(ct)
+            moved.append(_create_autofill_filler_campaign(ct, day.isoformat(), idea))
+    return moved
+
+
+def rebalance_filler_for_weeks(week_starts, today=None, actor_id=None, reason=""):
+    """Called right after a non-Filler campaign's schedule changes (see
+    scheduling.apply_drag / push_content_type_forward) — re-checks every week
+    touched by that move and, for any that's now short of the posting
+    minimum, relocates existing Filler posts to cover the gap rather than
+    leaving it for the next horizon sync. Safe to call with a wide or
+    overlapping set of weeks; a week already at the minimum is a no-op."""
+    today = today or date.today()
+    moved = []
+    for week_start in sorted(set(week_starts)):
+        moved.extend(_rebalance_week(week_start, today, actor_id=actor_id, reason=reason))
+    return moved
+
+
 def fill_weekly_filler_gaps(today=None, horizon_weeks=52):
     """Tops up every week from the current one through the horizon with
     extra Filler posts so each week hits MIN_POSTING_DAYS_PER_WEEK posting

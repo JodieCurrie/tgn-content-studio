@@ -323,6 +323,7 @@ def apply_drag(campaign_id, new_date_iso, mode, actor_id=None):
     c = db.row_to_dict(db.query_one("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)))
     if not c:
         raise ValueError("Campaign not found")
+    category_key = _category_key_for(c["primary_content_type_id"])
 
     old_date = c["publish_date"]
     delta_days = (date.fromisoformat(new_date_iso) - date.fromisoformat(old_date)).days
@@ -341,8 +342,13 @@ def apply_drag(campaign_id, new_date_iso, mode, actor_id=None):
                 (campaign_id,),
             )
         _log(campaign_id, actor_id, f"Moved from {old_date} to {new_date_iso} (this occurrence only).")
+        _rebalance_filler_after_move(
+            category_key, actor_id, touched_dates=[old_date, new_date_iso],
+            reason=" after this campaign's schedule changed",
+        )
 
     elif mode == "with_dependents":
+        pre_dates = _collect_move_dates(campaign_id)  # this campaign + all dependents, before moving
         _move_campaign(campaign_id, new_date_iso, delta_days)
         _shift_dependents(campaign_id, delta_days, actor_id)
         if c["schedule_origin"] == "rule":
@@ -351,6 +357,11 @@ def apply_drag(campaign_id, new_date_iso, mode, actor_id=None):
                 (campaign_id,),
             )
         _log(campaign_id, actor_id, f"Moved from {old_date} to {new_date_iso} along with its dependent content.")
+        touched = pre_dates + [_add_days(d, delta_days) for d in pre_dates]
+        _rebalance_filler_after_move(
+            category_key, actor_id, touched_dates=touched,
+            reason=" after this campaign's schedule changed",
+        )
 
     elif mode == "shift_rule":
         _move_campaign(campaign_id, new_date_iso, delta_days)
@@ -374,6 +385,10 @@ def apply_drag(campaign_id, new_date_iso, mode, actor_id=None):
             campaign_id,
             actor_id,
             f"Shifted the recurring schedule: from {old_date} onward now anchors to {new_date_iso}.",
+        )
+        earliest = min(date.fromisoformat(old_date), date.fromisoformat(new_date_iso))
+        _rebalance_filler_after_move(
+            category_key, actor_id, wide_from=earliest, reason=" after the recurring schedule shifted",
         )
 
     elif mode == "push_forward":
@@ -415,6 +430,8 @@ def push_content_type_forward(campaign_id, actor_id=None):
         raise ValueError("Campaign not found")
     if c["schedule_origin"] != "rule" or not c["scheduling_rule_id"]:
         raise ValueError("This isn't part of a recurring schedule.")
+    category_key = _category_key_for(c["primary_content_type_id"])
+    earliest_touched = date.fromisoformat(c["publish_date"])
 
     rule = db.row_to_dict(db.query_one("SELECT * FROM scheduling_rules WHERE id = ?", (c["scheduling_rule_id"],)))
     chain = db.rows_to_list(
@@ -445,7 +462,71 @@ def push_content_type_forward(campaign_id, actor_id=None):
         f"Pushed forward — skipped this slot in the '{rule['label']}' schedule; "
         f"every later occurrence moved forward one slot to keep the rhythm going.",
     )
+    _rebalance_filler_after_move(
+        category_key, actor_id, wide_from=earliest_touched, reason=" after the schedule was pushed forward",
+    )
     return {"new_date": new_dates[0]}
+
+
+def _category_key_for(content_type_id):
+    row = db.query_one("SELECT category_key FROM content_types WHERE id = ?", (content_type_id,))
+    return row["category_key"] if row else None
+
+
+def _collect_move_dates(campaign_id, _seen=None):
+    """This campaign's current publish_date plus every recursive dependent's,
+    read BEFORE any of them are moved — used so a "with dependents" drag can
+    tell the filler rebalancer every week that's about to be vacated/entered,
+    not just the one campaign the user actually dragged."""
+    _seen = _seen if _seen is not None else set()
+    if campaign_id in _seen:
+        return []
+    _seen.add(campaign_id)
+    row = db.query_one("SELECT publish_date FROM campaigns WHERE id = ?", (campaign_id,))
+    dates = [row["publish_date"]] if row else []
+    dependents = db.query("SELECT id FROM campaigns WHERE depends_on_campaign_id = ?", (campaign_id,))
+    for dep in dependents:
+        dates.extend(_collect_move_dates(dep["id"], _seen))
+    return dates
+
+
+def move_campaign_to_date(campaign_id, new_date_iso):
+    """Public wrapper around _move_campaign for callers outside this module
+    (content.rebalance_filler_for_weeks) that need to relocate a campaign
+    without going through the drag-mode/rule-exception machinery — used to
+    relocate an existing Filler post rather than dragging it."""
+    c = db.row_to_dict(db.query_one("SELECT publish_date FROM campaigns WHERE id = ?", (campaign_id,)))
+    if not c:
+        raise ValueError("Campaign not found")
+    delta_days = (date.fromisoformat(new_date_iso) - date.fromisoformat(c["publish_date"])).days
+    _move_campaign(campaign_id, new_date_iso, delta_days)
+    return delta_days
+
+
+def _rebalance_filler_after_move(category_key, actor_id, touched_dates=None, wide_from=None, reason=""):
+    """Sept, per Jodie: moving a Targeted (or Monthly) campaign off/onto a
+    day can push a week under the 4-post minimum, or it can drop a week that
+    was already under the minimum into range — either way the *existing*
+    pool of Filler posts should be reshuffled to cover it automatically,
+    without waiting for the next horizon sync. Deliberately does nothing
+    when the campaign that moved is Filler itself — a filler post dragged on
+    its own only ever affects other filler through the explicit
+    "push_all_filler_forward" opt-in, never automatically."""
+    if category_key == "filler":
+        return
+    if not touched_dates and wide_from is None:
+        return
+    from . import content as content_module  # local import to avoid the top-level cycle
+    today = date.today()
+    if wide_from is not None:
+        # 52 weeks forward from the earliest touched date itself, not from
+        # today — a shifted rule can already sit far in the future, and the
+        # sweep still needs to cover the year *following that point*.
+        horizon_end = wide_from + timedelta(days=7 * 52)
+        weeks = content_module.weeks_between(wide_from, horizon_end)
+    else:
+        weeks = [content_module.week_start_for(d) for d in touched_dates]
+    content_module.rebalance_filler_for_weeks(weeks, today=today, actor_id=actor_id, reason=reason)
 
 
 def _move_campaign(campaign_id, new_date_iso, delta_days):
