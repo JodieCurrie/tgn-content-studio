@@ -9,8 +9,31 @@
 </div>
 
 <div class="card card-pad" style="margin-bottom:18px;">
-  <form id="idea-form" style="display:flex; gap:8px;">
-    <input class="field-input" type="text" id="idea-title" placeholder="e.g. Why does God allow suffering?" style="flex:1;" required>
+  <form id="idea-form">
+    <input class="field-input" type="text" id="idea-title" placeholder="e.g. Why does God allow suffering?" style="width:100%; margin-bottom:10px;" required>
+
+    <label class="field-label">Content type <span class="page-subtitle" style="display:inline;">(optional — tag it now and it fills a matching slot automatically)</span></label>
+    <select class="field-select" id="idea-category" style="margin-bottom:8px;">
+      <option value="" selected>— Untagged —</option>
+      <option value="targeted">Targeted Campaign</option>
+      <option value="monthly">Monthly</option>
+      <option value="filler">Filler</option>
+    </select>
+    <select class="field-select" id="idea-type-targeted" style="margin-bottom:10px; display:none;"></select>
+    <select class="field-select" id="idea-type-monthly" style="margin-bottom:10px; display:none;">
+      <option value="">Which type of Monthly post?</option>
+    </select>
+    <select class="field-select" id="idea-type-filler" style="margin-bottom:10px; display:none;">
+      <option value="">Which type of Filler post?</option>
+    </select>
+
+    <label class="field-label">Notes</label>
+    <textarea class="field-input" id="idea-notes" rows="2" style="margin-bottom:10px;"></textarea>
+
+    <label class="field-label">Links (one per line)</label>
+    <textarea class="field-input" id="idea-links" rows="2" placeholder="https://drive.google.com/..." style="margin-bottom:12px;"></textarea>
+
+    <div id="idea-form-error" class="flash error" style="display:none;"></div>
     <button class="btn btn-primary" type="submit">Add idea</button>
   </form>
 </div>
@@ -45,6 +68,7 @@
     <div style="flex:1;"><strong>{{ s.title }}</strong> → {{ s.campaign_title }}
       <div class="page-subtitle" style="margin:0;">{{ s.publish_date|friendly_date_long }}</div>
     </div>
+    <button type="button" class="btn btn-sm btn-ghost js-delete-idea" data-idea-id="{{ s.id }}" data-idea-scheduled="1" title="Delete this idea">✕</button>
   </div>
   {% endfor %}
 </div>
