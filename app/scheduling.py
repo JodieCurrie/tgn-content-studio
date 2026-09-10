@@ -224,6 +224,7 @@ def ensure_horizon_rolled_forward():
     materialize_all_active_rules()
     from . import content as content_module
     content_module.fill_weekly_filler_gaps()
+    content_module.backfill_unscheduled_ideas()
 
     now_iso = datetime.utcnow().isoformat()
     db.execute(

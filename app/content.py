@@ -114,6 +114,88 @@ def _oldest_matching_idea(ct):
     return idea
 
 
+# Sept, per Jodie ("its not pulling targeted campaigns from the ideas sheet
+# automatically"): _oldest_matching_idea() above only ever runs at the
+# moment a NEW occurrence gets materialized (materialize_rule() /
+# fill_weekly_filler_gaps() in scheduling.py). But every scheduling rule
+# materializes a full year of future Campaign rows up front (see
+# scheduling.RULE_HORIZON_WEEKS) — so by the time Jodie actually gets
+# around to tagging an idea, the next 52 weeks of slots for that content
+# type usually already exist as real, still-generic-titled Campaign rows
+# ("New Targeted Campaign", or the bare content-type label for a Filler
+# autofill day). Those never get revisited, so a freshly-tagged idea would
+# otherwise sit unscheduled for up to a year waiting for a brand new
+# occurrence to be generated. This finds the SOONEST such still-untouched
+# placeholder and swaps the idea into it directly instead.
+def _backfill_idea_into_placeholder_slot(idea):
+    if not idea or not idea.get("content_type_id") or idea.get("scheduled_campaign_id"):
+        return None
+    ct = get_content_type(idea["content_type_id"])
+    if not ct or ct["category_key"] not in ("monthly", "filler", "targeted"):
+        return None
+    if ct["key"] in IDEA_REQUIRES_LINK_TYPE_KEYS and not (idea["links"] or "").strip():
+        return None
+
+    # A placeholder's title is either the owning rule's default_title (rule-
+    # materialized Targeted/Monthly slots) or the content type's own label
+    # (a Filler autofill day with no idea available at the time) — see
+    # create_campaign_from_rule() and _create_autofill_filler_campaign()
+    # above, which are the only two places that ever set a campaign's
+    # title from one of these two fallbacks.
+    rule = db.query_one("SELECT default_title FROM scheduling_rules WHERE content_type_id = ?", (ct["id"],))
+    candidate_titles = {ct["label"]}
+    if rule and rule["default_title"]:
+        candidate_titles.add(rule["default_title"])
+    candidate_titles = list(candidate_titles)
+
+    placeholder_clause = " OR ".join(["title = ?"] * len(candidate_titles))
+    slot = db.query_one(
+        f"""SELECT id, title FROM campaigns
+            WHERE primary_content_type_id = ? AND source_idea_id IS NULL
+              AND schedule_origin IN ('rule', 'manual') AND publish_date >= ?
+              AND ({placeholder_clause})
+            ORDER BY publish_date ASC LIMIT 1""",
+        (ct["id"], date.today().isoformat(), *candidate_titles),
+    )
+    if not slot:
+        return None
+
+    old_title = slot["title"]
+    new_title = idea["title"]
+    db.execute(
+        "UPDATE campaigns SET title = ?, notes = ?, source_idea_id = ?, updated_at = datetime('now') WHERE id = ?",
+        (new_title, idea_notes_with_links(idea), idea["id"], slot["id"]),
+    )
+    db.execute("UPDATE content_ideas SET scheduled_campaign_id = ? WHERE id = ?", (slot["id"], idea["id"]))
+    _maybe_rename_dependents(slot["id"], old_title, new_title)
+    db.execute(
+        "INSERT INTO activity_log (campaign_id, actor_id, message) VALUES (?, NULL, ?)",
+        (slot["id"], f"Filled from a matching idea already waiting in the Ideas bank: '{new_title}'."),
+    )
+    return slot["id"]
+
+
+def backfill_unscheduled_ideas():
+    """Sweeps every tagged-but-not-yet-scheduled idea and tries to place
+    each into a matching placeholder slot (see
+    _backfill_idea_into_placeholder_slot above). Safe to call repeatedly —
+    an idea that finds no open placeholder just stays as it was, and one
+    that gets placed is marked scheduled so it's never reconsidered.
+    Called from the idea create/update API routes for immediate effect,
+    and from scheduling.ensure_horizon_rolled_forward() as an ongoing
+    safety net (e.g. an idea tagged right as the rule horizon rolls)."""
+    ideas = db.rows_to_list(db.query(
+        """SELECT * FROM content_ideas WHERE content_type_id IS NOT NULL AND scheduled_campaign_id IS NULL
+           ORDER BY created_at ASC"""
+    ))
+    placed = []
+    for idea in ideas:
+        campaign_id = _backfill_idea_into_placeholder_slot(idea)
+        if campaign_id:
+            placed.append((idea["id"], campaign_id))
+    return placed
+
+
 def idea_notes_with_links(idea):
     notes = idea["notes"] or ""
     links = (idea["links"] or "").strip()
