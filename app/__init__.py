@@ -10,7 +10,11 @@ def create_app(test_config=None):
 
     instance_dir = Path(app.instance_path)
     instance_dir.mkdir(parents=True, exist_ok=True)
-    uploads_dir = instance_dir / "uploads"
+    # UPLOAD_FOLDER defaults to the (ephemeral) instance dir, same as
+    # DATABASE_PATH below, but — like DATABASE_PATH — can be pointed at a
+    # Render persistent disk via env var so uploaded files survive deploys
+    # and restarts too, not just the database.
+    uploads_dir = Path(os.environ.get("UPLOAD_FOLDER", str(instance_dir / "uploads")))
     uploads_dir.mkdir(parents=True, exist_ok=True)
 
     app.config.from_mapping(
@@ -26,6 +30,11 @@ def create_app(test_config=None):
 
     if test_config:
         app.config.update(test_config)
+
+    # DATABASE_PATH may point outside the instance dir (e.g. at a Render
+    # persistent disk's mount path via env var) — make sure that directory
+    # actually exists before sqlite3 tries to open a file in it.
+    Path(app.config["DATABASE_PATH"]).parent.mkdir(parents=True, exist_ok=True)
 
     db_module.register(app)
     db_module.init_db(app.config["DATABASE_PATH"])
