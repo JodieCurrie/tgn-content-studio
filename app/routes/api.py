@@ -532,7 +532,17 @@ def update_idea(idea_id):
 @bp.route("/ideas/<int:idea_id>", methods=["DELETE"])
 @login_required
 def delete_idea(idea_id):
+    # Sept, per Jodie: deleting an idea that's already been tagged and
+    # scheduled must free its calendar slot back up — see
+    # content_module.unschedule_idea() — rather than just orphaning the slot
+    # with the deleted idea's title stuck on it forever.
+    idea = db.row_to_dict(db.query_one("SELECT * FROM content_ideas WHERE id = ?", (idea_id,)))
+    if idea:
+        content_module.unschedule_idea(idea)
     db.execute("DELETE FROM content_ideas WHERE id = ?", (idea_id,))
+    # Let the very next matching idea (if any) claim the slot just freed up,
+    # instead of waiting for the next horizon sweep.
+    content_module.backfill_unscheduled_ideas()
     return jsonify({"ok": True})
 
 
