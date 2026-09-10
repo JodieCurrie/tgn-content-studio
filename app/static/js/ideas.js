@@ -1,21 +1,83 @@
+// ---------------------------------------------------------------------------
+// Quick-add form: type + notes right up front (Sept, per Jodie — no more
+// add-then-click-in-to-tag two-step). Reuses the same category -> specific-
+// type toggle as the edit modal below, wired straight onto the page's own
+// <select> elements instead of ones built into a modal's innerHTML.
+// ---------------------------------------------------------------------------
+function populateQuickAddTypeOptions() {
+  const targetedSelect = document.getElementById("idea-type-targeted");
+  const monthlySelect = document.getElementById("idea-type-monthly");
+  const fillerSelect = document.getElementById("idea-type-filler");
+  if (!targetedSelect) return; // quick-add form not on this page
+  targetedSelect.innerHTML = typeOptionsHtml(window.TGN_TARGETED_TYPES || [], null);
+  monthlySelect.innerHTML = `<option value="">Which type of Monthly post?</option>` + typeOptionsHtml(window.TGN_MONTHLY_TYPES || [], null);
+  fillerSelect.innerHTML = `<option value="">Which type of Filler post?</option>` + typeOptionsHtml(window.TGN_FILLER_TYPES || [], null);
+}
+
+function wireQuickAddCategoryToggle() {
+  const categorySelect = document.getElementById("idea-category");
+  if (!categorySelect) return;
+  const groups = {
+    targeted: document.getElementById("idea-type-targeted"),
+    monthly: document.getElementById("idea-type-monthly"),
+    filler: document.getElementById("idea-type-filler"),
+  };
+  categorySelect.addEventListener("change", () => {
+    Object.entries(groups).forEach(([key, el]) => {
+      el.style.display = categorySelect.value === key ? "" : "none";
+    });
+  });
+}
+
+function quickAddSelectedTypeId() {
+  const categorySelect = document.getElementById("idea-category");
+  if (!categorySelect || !categorySelect.value) return null;
+  const el = document.getElementById(`idea-type-${categorySelect.value}`);
+  const val = el ? el.value : "";
+  return val ? parseInt(val, 10) : null;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  populateQuickAddTypeOptions();
+  wireQuickAddCategoryToggle();
+});
+
 document.addEventListener("submit", async (e) => {
   if (e.target.id !== "idea-form") return;
   e.preventDefault();
   const input = document.getElementById("idea-title");
   const title = input.value.trim();
   if (!title) return;
+  const errBox = document.getElementById("idea-form-error");
   try {
-    await tgnFetch("/api/ideas", { method: "POST", body: JSON.stringify({ title }) });
+    await tgnFetch("/api/ideas", {
+      method: "POST",
+      body: JSON.stringify({
+        title,
+        content_type_id: quickAddSelectedTypeId(),
+        notes: document.getElementById("idea-notes").value,
+        links: document.getElementById("idea-links").value,
+      }),
+    });
     window.location.reload();
   } catch (err) {
-    alert(err.message);
+    if (errBox) {
+      errBox.textContent = err.message;
+      errBox.style.display = "block";
+    } else {
+      alert(err.message);
+    }
   }
 });
 
 document.addEventListener("click", (e) => {
   if (e.target.classList.contains("js-delete-idea")) {
     e.stopPropagation();
-    if (!confirm("Delete this idea?")) return;
+    const scheduled = e.target.dataset.ideaScheduled === "1";
+    const confirmMsg = scheduled
+      ? "Delete this idea? Its calendar slot will go to the next matching idea in your list, or sit as a blank placeholder if there isn't one waiting."
+      : "Delete this idea?";
+    if (!confirm(confirmMsg)) return;
     tgnFetch(`/api/ideas/${e.target.dataset.ideaId}`, { method: "DELETE" }).then(() => {
       window.location.reload();
     }).catch(err => alert(err.message));
