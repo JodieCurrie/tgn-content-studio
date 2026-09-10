@@ -114,6 +114,122 @@ def _oldest_matching_idea(ct):
     return idea
 
 
+# Sept, per Jodie ("can the filler posts please always pull from the ideas
+# ... before generating new blank filler posts"): unlike Monthly/Targeted,
+# a Filler gap day isn't tied to one specific content type — any eligible
+# Filler subtype is interchangeable, chosen purely by rotation (see
+# _pick_filler_type_for_gap). So a Filler idea shouldn't have to wait for
+# the rotation to land on its exact tagged type; it should be used for the
+# very next gap day, whatever type it's tagged as, ahead of any blank
+# auto-generated post. Returns (idea, content_type) for the oldest
+# still-unscheduled idea tagged with ANY eligible Filler type, or
+# (None, None) once the Filler idea backlog is empty.
+def _oldest_unscheduled_filler_idea():
+    types = _eligible_autofill_filler_types()
+    if not types:
+        return None, None
+    type_ids = [t["id"] for t in types]
+    placeholder = ",".join("?" * len(type_ids))
+    idea = db.row_to_dict(db.query_one(
+        f"""SELECT * FROM content_ideas
+            WHERE content_type_id IN ({placeholder}) AND scheduled_campaign_id IS NULL
+            ORDER BY created_at ASC LIMIT 1""",
+        tuple(type_ids),
+    ))
+    if not idea:
+        return None, None
+    ct = next(t for t in types if t["id"] == idea["content_type_id"])
+    return idea, ct
+
+
+# Sept, per Jodie ("its not pulling targeted campaigns from the ideas sheet
+# automatically"): _oldest_matching_idea() above only ever runs at the
+# moment a NEW occurrence gets materialized (materialize_rule() /
+# fill_weekly_filler_gaps() in scheduling.py). But every scheduling rule
+# materializes a full year of future Campaign rows up front (see
+# scheduling.RULE_HORIZON_WEEKS) — so by the time Jodie actually gets
+# around to tagging an idea, the next 52 weeks of slots for that content
+# type usually already exist as real, still-generic-titled Campaign rows
+# ("New Targeted Campaign", or the bare content-type label for a Filler
+# autofill day). Those never get revisited, so a freshly-tagged idea would
+# otherwise sit unscheduled for up to a year waiting for a brand new
+# occurrence to be generated. This finds the SOONEST such still-untouched
+# placeholder and swaps the idea into it directly instead.
+def _soonest_matching_placeholder_slot(ct):
+    """Targeted/Monthly: a placeholder's title is either the owning rule's
+    default_title (rule-materialized slots) or the content type's own label
+    (a Filler autofill day with no idea available at the time) — see
+    create_campaign_from_rule() and _create_autofill_filler_campaign() above,
+    the only two places that ever set a campaign's title from one of these
+    two fallbacks. Only a slot already of this EXACT type counts — Targeted
+    and Monthly slots follow real per-type scheduling rules, so a slot can't
+    be repurposed to a different type the way a Filler one can."""
+    rule = db.query_one("SELECT default_title FROM scheduling_rules WHERE content_type_id = ?", (ct["id"],))
+    candidate_titles = {ct["label"]}
+    if rule and rule["default_title"]:
+        candidate_titles.add(rule["default_title"])
+    candidate_titles = list(candidate_titles)
+
+    placeholder_clause = " OR ".join(["title = ?"] * len(candidate_titles))
+    return db.query_one(
+        f"""SELECT id, title, primary_content_type_id FROM campaigns
+            WHERE primary_content_type_id = ? AND source_idea_id IS NULL
+              AND schedule_origin IN ('rule', 'manual') AND publish_date >= ?
+              AND ({placeholder_clause})
+            ORDER BY publish_date ASC LIMIT 1""",
+        (ct["id"], date.today().isoformat(), *candidate_titles),
+    )
+
+
+# Sept, per Jodie ("then it can replace the scheduled ones"): a blank Filler
+# day is generic by nature — its type was only ever picked by rotation (see
+# _pick_filler_type_for_gap) for lack of anything better at the time — so a
+# newly-tagged Filler idea should be able to claim the soonest blank Filler
+# slot REGARDLESS of which eligible Filler type that slot happened to land
+# on, not just a slot that already matches the idea's own type exactly.
+def _soonest_blank_filler_slot():
+    types = _eligible_autofill_filler_types()
+    if not types:
+        return None
+    type_ids = [t["id"] for t in types]
+    labels_by_id = {t["id"]: t["label"] for t in types}
+    placeholder = ",".join("?" * len(type_ids))
+    rows = db.rows_to_list(db.query(
+        f"""SELECT id, title, publish_date, primary_content_type_id FROM campaigns
+            WHERE primary_content_type_id IN ({placeholder}) AND source_idea_id IS NULL
+              AND schedule_origin = 'manual' AND publish_date >= ?
+            ORDER BY publish_date ASC""",
+        (*type_ids, date.today().isoformat()),
+    ))
+    for row in rows:
+        # Only a still-blank slot (title never touched from its type's own
+        # label) counts — a manually-retitled or otherwise-claimed Filler
+        # post must never be clobbered.
+        if row["title"] == labels_by_id.get(row["primary_content_type_id"]):
+            return row
+    return None
+
+
+# Filler is the one category where a placeholder's content TYPE itself can
+# change (see _soonest_blank_filler_slot above) — Targeted/Monthly slots
+# never do. Swaps the campaign's own output/tasks over to the new type;
+# safe because a still-blank Filler placeholder has never been worked on
+# (no pairs/follow-ups ever spawn from a Filler type — see
+# _spawn_paired_and_followup_content) so there's nothing else to migrate.
+def _retype_blank_filler_campaign(campaign_id, new_ct, publish_date_iso):
+    old_output_ids = [r["id"] for r in db.query(
+        "SELECT id FROM content_outputs WHERE campaign_id = ?", (campaign_id,)
+    )]
+    for output_id in old_output_ids:
+        db.execute("DELETE FROM content_outputs WHERE id = ?", (output_id,))  # cascades tasks/pipeline_stages
+    db.execute(
+        "UPDATE campaigns SET primary_content_type_id = ?, updated_at = datetime('now') WHERE id = ?",
+        (new_ct["id"], campaign_id),
+    )
+    add_output(campaign_id, new_ct["id"], publish_date_iso)
+    task_engine.generate_tasks_for_campaign(campaign_id)
+
+
 # Sept, per Jodie ("its not pulling targeted campaigns from the ideas sheet
 # automatically"): _oldest_matching_idea() above only ever runs at the
 # moment a NEW occurrence gets materialized (materialize_rule() /
@@ -136,32 +252,17 @@ def _backfill_idea_into_placeholder_slot(idea):
     if ct["key"] in IDEA_REQUIRES_LINK_TYPE_KEYS and not (idea["links"] or "").strip():
         return None
 
-    # A placeholder's title is either the owning rule's default_title (rule-
-    # materialized Targeted/Monthly slots) or the content type's own label
-    # (a Filler autofill day with no idea available at the time) — see
-    # create_campaign_from_rule() and _create_autofill_filler_campaign()
-    # above, which are the only two places that ever set a campaign's
-    # title from one of these two fallbacks.
-    rule = db.query_one("SELECT default_title FROM scheduling_rules WHERE content_type_id = ?", (ct["id"],))
-    candidate_titles = {ct["label"]}
-    if rule and rule["default_title"]:
-        candidate_titles.add(rule["default_title"])
-    candidate_titles = list(candidate_titles)
-
-    placeholder_clause = " OR ".join(["title = ?"] * len(candidate_titles))
-    slot = db.query_one(
-        f"""SELECT id, title FROM campaigns
-            WHERE primary_content_type_id = ? AND source_idea_id IS NULL
-              AND schedule_origin IN ('rule', 'manual') AND publish_date >= ?
-              AND ({placeholder_clause})
-            ORDER BY publish_date ASC LIMIT 1""",
-        (ct["id"], date.today().isoformat(), *candidate_titles),
-    )
+    if ct["category_key"] == "filler":
+        slot = _soonest_blank_filler_slot()
+    else:
+        slot = _soonest_matching_placeholder_slot(ct)
     if not slot:
         return None
 
     old_title = slot["title"]
     new_title = idea["title"]
+    if slot["primary_content_type_id"] != ct["id"]:
+        _retype_blank_filler_campaign(slot["id"], ct, slot["publish_date"])
     db.execute(
         "UPDATE campaigns SET title = ?, notes = ?, source_idea_id = ?, updated_at = datetime('now') WHERE id = ?",
         (new_title, idea_notes_with_links(idea), idea["id"], slot["id"]),
@@ -343,10 +444,12 @@ def _fill_gap_days_for_week(week_start, week_end, today):
 
     created = []
     for day in chosen_days:
-        ct = _pick_filler_type_for_gap(used_type_ids_this_week)
+        idea, ct = _oldest_unscheduled_filler_idea()
+        if not ct:
+            ct = _pick_filler_type_for_gap(used_type_ids_this_week)
+            idea = None
         if not ct:
             break
-        idea = _oldest_matching_idea(ct)
         campaign_id = _create_autofill_filler_campaign(ct, day.isoformat(), idea)
         created.append(campaign_id)
         used_type_ids_this_week.add(ct["id"])
@@ -449,10 +552,12 @@ def _rebalance_week(week_start, today, actor_id=None, reason=""):
                 )
                 if r["primary_content_type_id"]
             }
-            ct = _pick_filler_type_for_gap(used_type_ids)
+            idea, ct = _oldest_unscheduled_filler_idea()
+            if not ct:
+                ct = _pick_filler_type_for_gap(used_type_ids)
+                idea = None
             if not ct:
                 continue
-            idea = _oldest_matching_idea(ct)
             moved.append(_create_autofill_filler_campaign(ct, day.isoformat(), idea))
     return moved
 
