@@ -356,6 +356,27 @@ CREATE TABLE IF NOT EXISTS app_state (
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- ---------------------------------------------------------------------------
+-- Social Growth panel (Sept) — a point-in-time snapshot per platform each
+-- time app/social_stats.py syncs, so the home dashboard can show
+-- week-over-week deltas ("+42 subscribers this week") rather than just a
+-- raw current total. `extra` is a JSON blob (db.to_json/from_json) for
+-- whatever a given platform's API returns beyond followers/views — recent
+-- video stats, video_count, etc. Starts with 'youtube'; the shape is
+-- generic enough that a second platform's sync just adds more rows with a
+-- different `platform` value.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS social_snapshots (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    platform        TEXT NOT NULL,              -- 'youtube'
+    captured_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    followers       INTEGER,                    -- subscriber count, for platforms that have one
+    total_views     INTEGER,                    -- lifetime view count, where the API reports one
+    extra           TEXT NOT NULL DEFAULT '{}'  -- JSON: platform-specific extras (video_count, recent videos, ...)
+);
+
+CREATE INDEX IF NOT EXISTS idx_social_snapshots_platform_captured ON social_snapshots(platform, captured_at);
+
 CREATE INDEX IF NOT EXISTS idx_campaigns_publish_date ON campaigns(publish_date);
 CREATE INDEX IF NOT EXISTS idx_outputs_campaign ON content_outputs(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_outputs_publish_date ON content_outputs(publish_date);

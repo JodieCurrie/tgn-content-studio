@@ -52,6 +52,17 @@ def register(app):
     def status_label(value):
         return (value or "").replace("_", " ").title()
 
+    @app.template_filter("commas")
+    def commas(value):
+        """1234567 -> '1,234,567' (Social Growth panel follower/view
+        counts). Leaves None/blank alone rather than printing '0'."""
+        if value is None or value == "":
+            return ""
+        try:
+            return f"{int(value):,}"
+        except (TypeError, ValueError):
+            return value
+
     @app.template_filter("stage_label")
     def stage_label(stage_key):
         """Human label for a pipeline stage_key (Tasks tab, Sept redesign) —

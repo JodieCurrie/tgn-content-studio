@@ -5,6 +5,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from . import db
 from . import pipeline
 from . import scheduling
+from . import social_stats
 
 bp = Blueprint("auth", __name__)
 
@@ -43,6 +44,13 @@ def load_logged_in_user():
         # every request but for the one day it actually re-syncs.
         if g.user:
             scheduling.ensure_horizon_rolled_forward()
+        # Sept: same "no scheduler process, so check cheaply on request"
+        # pattern for the Social Growth panel's YouTube stats — see
+        # social_stats.ensure_synced(). A no-op on every request except the
+        # one time a day it actually re-syncs, and a total no-op if Google
+        # isn't connected yet.
+        if g.user:
+            social_stats.ensure_synced()
 
 
 def login_required(view):

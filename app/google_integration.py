@@ -37,11 +37,15 @@ DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3"
 
 # drive.file (not full drive access) = the app can only see/manage files
 # it creates itself — least-privilege for a shared TGN Drive folder.
+# youtube.readonly (Sept, Social Growth panel) = read-only channel stats and
+# recent uploads for whichever YouTube channel is on this same Google
+# account — no ability to upload, edit, or delete anything on the channel.
 SCOPES = [
     "openid",
     "email",
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/youtube.readonly",
 ]
 
 
@@ -189,6 +193,22 @@ def get_valid_access_token():
         (access_token, expires_at_new),
     )
     return access_token
+
+
+def authed_get(url):
+    """Shared low-level GET for any Google JSON API this app talks to —
+    used by app/youtube_integration.py so it doesn't need its own token/
+    error-handling boilerplate. Raises GoogleNotConnected (via
+    get_valid_access_token) or RuntimeError on an HTTP error, same as
+    every other call in this module."""
+    access_token = get_valid_access_token()
+    req = urllib.request.Request(url)
+    req.add_header("Authorization", f"Bearer {access_token}")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Google request to {url} failed ({e.code}): {e.read().decode('utf-8', errors='replace')}") from e
 
 
 # ---------------------------------------------------------------------------
