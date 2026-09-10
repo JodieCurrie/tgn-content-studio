@@ -681,6 +681,8 @@ def update_campaign_fields(campaign_id, fields):
     db.execute(f"UPDATE campaigns SET {set_clause}, updated_at = datetime('now') WHERE id = ?", params)
     if "title" in allowed and campaign and campaign.get("source_idea_id"):
         _maybe_release_idea_back_to_pool(campaign["source_idea_id"], campaign_id, allowed["title"])
+    if "title" in allowed and campaign:
+        _maybe_rename_dependents(campaign_id, campaign["title"], allowed["title"])
     for field_name, task_name in SCRIPT_FIELD_AUTO_COMPLETE_TASKS.items():
         if field_name in allowed and (allowed[field_name] or "").strip():
             _auto_complete_shoot_task(campaign_id, "script", task_name)
@@ -705,6 +707,39 @@ def _auto_complete_shoot_task(campaign_id, stage_key, task_name):
         return
     db.execute("UPDATE tasks SET status = 'complete', updated_at = datetime('now') WHERE id = ?", (task["id"],))
     pipeline.after_task_status_change(task["id"])
+
+
+def _maybe_rename_dependents(parent_campaign_id, old_title, new_title):
+    """Highlight/Snippet 1 & 2, the Full YouTube Portrait Repost, and Podcast
+    Highlight/Question follow-ups (see _spawn_targeted_followups /
+    _spawn_podcast_highlight_followups) get their titles baked in as
+    "{parent title} — {label}" at the moment they're created — plain text,
+    not a live reference. Retitling the parent later left them stale, which
+    is exactly what Jodie ran into. Fix: whenever the parent's title
+    changes, walk its dependents and re-prefix any whose title still
+    literally starts with the OLD "{old_title} — " pattern, swapping in the
+    new title but keeping whatever label/suffix follows it. A dependent
+    Jodie has since retitled herself no longer matches that prefix, so it's
+    deliberately left alone rather than clobbered."""
+    if not old_title or old_title == new_title:
+        return
+    prefix = f"{old_title} — "
+    dependents = db.rows_to_list(db.query(
+        "SELECT id, title FROM campaigns WHERE depends_on_campaign_id = ?", (parent_campaign_id,)
+    ))
+    for dep in dependents:
+        if not (dep["title"] or "").startswith(prefix):
+            continue
+        suffix = dep["title"][len(prefix):]
+        new_dep_title = f"{new_title} — {suffix}"
+        db.execute(
+            "UPDATE campaigns SET title = ?, updated_at = datetime('now') WHERE id = ?",
+            (new_dep_title, dep["id"]),
+        )
+        db.execute(
+            "INSERT INTO activity_log (campaign_id, actor_id, message) VALUES (?, NULL, ?)",
+            (dep["id"], f"Renamed to follow its parent campaign's new title ('{old_title}' → '{new_title}')."),
+        )
 
 
 def _maybe_release_idea_back_to_pool(idea_id, campaign_id, new_title):
