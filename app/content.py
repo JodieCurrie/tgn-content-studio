@@ -306,6 +306,66 @@ def idea_notes_with_links(idea):
     return f"{notes}\n\n{links_block}" if notes else links_block
 
 
+def _blank_placeholder_title(campaign, ct):
+    """The title a slot gets when nothing's filling it — mirrors exactly how
+    each origin creates a blank slot in the first place: create_campaign_from_rule()
+    uses the rule's own default_title for a 'rule'-origin campaign,
+    _create_autofill_filler_campaign() falls back to the content type's own
+    label for a 'manual'-origin (Filler autofill) one. Used by
+    unschedule_idea() below to put a slot back exactly the way it'd look if
+    an idea had never claimed it."""
+    if campaign["schedule_origin"] == "rule":
+        rule = db.query_one("SELECT default_title FROM scheduling_rules WHERE content_type_id = ?", (ct["id"],))
+        if rule and rule["default_title"]:
+            return rule["default_title"]
+    return ct["label"]
+
+
+# Sept, per Jodie ("no way to delete an idea... once scheduled... can we
+# delete and then other content on the idea list is scheduled in its place,
+# replaced with a blank content item"): tagging an idea hands its title to a
+# calendar slot (see _backfill_idea_into_placeholder_slot), but deleting the
+# idea afterward used to just remove the idea row and leave the slot stuck
+# with that title forever. This reverses that hold — called right before the
+# idea itself is deleted — so the slot goes back to being a plain refillable
+# placeholder, exactly as if the idea had never claimed it. The caller is
+# expected to run backfill_unscheduled_ideas() right afterward so the very
+# next matching idea (if any) claims this freed slot immediately instead of
+# waiting for the next horizon sweep.
+def unschedule_idea(idea):
+    campaign_id = idea.get("scheduled_campaign_id") if idea else None
+    if not campaign_id:
+        return None
+    campaign = db.row_to_dict(db.query_one("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)))
+    if not campaign:
+        return None
+    # Never rewrite something that's already happened.
+    if campaign["publish_date"] < date.today().isoformat():
+        return None
+    # Only revert a slot THIS idea put its title on — if Jodie's since
+    # retitled it herself, or a different idea has already taken it over,
+    # deleting this idea must leave that alone.
+    if campaign["source_idea_id"] != idea["id"]:
+        return None
+
+    ct = get_content_type(campaign["primary_content_type_id"])
+    if not ct:
+        return None
+
+    old_title = campaign["title"]
+    blank_title = _blank_placeholder_title(campaign, ct)
+    db.execute(
+        "UPDATE campaigns SET title = ?, notes = '', source_idea_id = NULL, updated_at = datetime('now') WHERE id = ?",
+        (blank_title, campaign_id),
+    )
+    _maybe_rename_dependents(campaign_id, old_title, blank_title)
+    db.execute(
+        "INSERT INTO activity_log (campaign_id, actor_id, message) VALUES (?, NULL, ?)",
+        (campaign_id, f"The idea behind this slot ('{old_title}') was deleted — reopened as a blank placeholder."),
+    )
+    return campaign_id
+
+
 # ---------------------------------------------------------------------------
 # Weekly filler gap-fill (Sept). Jodie's posting-frequency target is measured
 # in DAYS, not raw post count: "3-4 posts a week" really meant "post on a
