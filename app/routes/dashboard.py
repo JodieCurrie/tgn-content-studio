@@ -3,6 +3,7 @@ from flask import Blueprint, render_template, g
 from .. import db
 from ..auth import login_required
 from .. import analytics
+from .. import social_stats
 
 bp = Blueprint("dashboard", __name__)
 
@@ -23,4 +24,6 @@ def home():
         )
     )
 
-    return render_template("home.html", summary=summary, upcoming=upcoming)
+    social = social_stats.home_panel()
+
+    return render_template("home.html", summary=summary, upcoming=upcoming, social=social)
