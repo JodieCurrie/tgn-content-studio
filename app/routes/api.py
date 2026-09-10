@@ -502,6 +502,9 @@ def create_idea():
         "INSERT INTO content_ideas (title, notes, links, content_type_id, created_by) VALUES (?,?,?,?,?)",
         (title, data.get("notes", ""), data.get("links", ""), data.get("content_type_id"), g.user["id"]),
     )
+    if data.get("content_type_id"):
+        idea = db.row_to_dict(db.query_one("SELECT * FROM content_ideas WHERE id = ?", (idea_id,)))
+        content_module._backfill_idea_into_placeholder_slot(idea)
     return jsonify({"id": idea_id})
 
 
@@ -520,6 +523,9 @@ def update_idea(idea_id):
         return jsonify({"ok": True})
     set_clause = ", ".join(f"{k} = ?" for k in fields)
     db.execute(f"UPDATE content_ideas SET {set_clause} WHERE id = ?", (*fields.values(), idea_id))
+    if "content_type_id" in fields and fields["content_type_id"]:
+        fresh_idea = db.row_to_dict(db.query_one("SELECT * FROM content_ideas WHERE id = ?", (idea_id,)))
+        content_module._backfill_idea_into_placeholder_slot(fresh_idea)
     return jsonify({"ok": True})
 
 
