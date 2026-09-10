@@ -18,6 +18,76 @@
   <div class="card stat-card"><div class="stat-num">{{ summary.awaiting_approval|length }}</div><div class="stat-label">Awaiting approval</div></div>
 </div>
 
+<div class="section-title" style="display:flex; align-items:baseline; justify-content:space-between; gap:10px;">
+  <span>Social Growth</span>
+  {% if social.by_key.youtube.has_data %}
+  <span class="page-subtitle" style="margin:0;">Last synced {{ social.by_key.youtube.captured_at|friendly_datetime }}</span>
+  {% endif %}
+</div>
+
+{% if not social.google_connected %}
+<div class="card card-pad">
+  <div class="empty-state">
+    Connect your Google account in <a href="{{ url_for('admin.integrations') }}">Admin → Integrations</a> to start tracking YouTube growth here.
+  </div>
+</div>
+{% else %}
+<div class="social-grid">
+  {% for p in social.platforms %}
+  <div class="card card-pad social-card">
+    <div class="social-card-head">
+      <span class="social-icon">{{ p.icon }}</span>
+      <span class="social-label">{{ p.label }}</span>
+      {% if not p.connected %}
+      <span class="pill social-pill-muted">Not connected yet</span>
+      {% elif not p.has_data %}
+      <span class="pill social-pill-muted">Syncing…</span>
+      {% endif %}
+    </div>
+    {% if p.connected and p.has_data %}
+    <div class="social-stat-row">
+      <div>
+        <div class="social-stat-num">{{ p.followers|commas }}</div>
+        <div class="social-stat-label">Subscribers</div>
+      </div>
+      <div>
+        <div class="social-stat-num">{{ p.total_views|commas }}</div>
+        <div class="social-stat-label">Total views</div>
+      </div>
+    </div>
+    {% if p.followers_delta is not none or p.views_delta is not none %}
+    <div class="social-delta-row">
+      {% if p.followers_delta is not none %}
+      <span class="social-delta {{ 'social-delta-up' if p.followers_delta >= 0 else 'social-delta-down' }}">{{ '▲' if p.followers_delta >= 0 else '▼' }} {{ p.followers_delta|abs|commas }} subscribers this week</span>
+      {% endif %}
+      {% if p.views_delta is not none %}
+      <span class="social-delta {{ 'social-delta-up' if p.views_delta >= 0 else 'social-delta-down' }}">{{ '▲' if p.views_delta >= 0 else '▼' }} {{ p.views_delta|abs|commas }} views this week</span>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+{% if social.by_key.youtube.has_data and social.by_key.youtube.recent_videos %}
+<div class="section-title">Recent YouTube videos</div>
+<div class="card">
+  {% for v in social.by_key.youtube.recent_videos %}
+  <div class="list-row">
+    <div style="flex:1;">
+      <strong><a href="{{ v.url }}" target="_blank" rel="noopener">{{ v.title }}</a></strong>
+      <div class="page-subtitle" style="margin:0;">{{ v.published_at|friendly_date }}</div>
+    </div>
+    <span class="pill">{{ v.view_count|commas }} views</span>
+    <span class="pill">{{ v.like_count|commas }} likes</span>
+    <span class="pill">{{ v.comment_count|commas }} comments</span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endif %}
+
 <div class="two-col">
   <div>
     <div class="section-title">Upcoming content</div>
