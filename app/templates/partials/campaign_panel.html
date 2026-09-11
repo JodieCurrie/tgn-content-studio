@@ -366,8 +366,18 @@
       <input type="checkbox" class="js-task-complete" data-task-id="{{ t.id }}" {{ 'checked' if t.status == 'complete' }}>
       <div style="flex:1;">
         <strong>{{ t.task_name }}</strong>
-        <div class="page-subtitle" style="margin:0;">{{ t.role_key|status_label }}{% if t.due_date %} · Due {{ t.due_date|friendly_date }}{% endif %}{% if t.assigned_name %} · {{ t.assigned_name }}{% endif %}</div>
+        <div class="page-subtitle" style="margin:0;">{{ t.role_key|status_label }}{% if t.due_date %} · Due {{ t.due_date|friendly_date }}{% endif %}</div>
       </div>
+      {% if current_user.role_is_admin or current_user.role_can_manage_all_content %}
+      <select class="field-select js-task-assign" data-task-id="{{ t.id }}" data-prev-value="{{ t.assigned_user_id or '' }}" style="max-width:130px; font-size:12.5px; padding:4px 6px;" title="Assign this task">
+        <option value="" {{ 'selected' if not t.assigned_user_id }}>Unassigned</option>
+        {% for u in users %}
+        <option value="{{ u.id }}" {{ 'selected' if t.assigned_user_id == u.id }}>{{ u.name }}</option>
+        {% endfor %}
+      </select>
+      {% elif t.assigned_name %}
+      <span class="page-subtitle">{{ t.assigned_name }}</span>
+      {% endif %}
     </div>
     {% else %}
     <div class="page-subtitle">No tasks generated for this yet.</div>
