@@ -220,6 +220,24 @@ document.addEventListener("change", (e) => {
       alert(err.message);
     });
   }
+  // Sept, per Jodie: a flat "Create X" task (Blog Video, Podcast Snippet,
+  // Filler, ...) had no way to hand it to someone else — reassigning it
+  // straight from the Tasks list, same PATCH the pipeline hand-off flows
+  // already use.
+  if (e.target.classList.contains("js-task-assign")) {
+    const el = e.target;
+    const previousValue = el.dataset.prevValue || "";
+    const assignedUserId = el.value ? parseInt(el.value, 10) : null;
+    tgnFetch(`/api/tasks/${el.dataset.taskId}`, {
+      method: "PATCH", body: JSON.stringify({ assigned_user_id: assignedUserId }),
+    }).then(() => {
+      el.dataset.prevValue = el.value;
+      if (typeof refreshPipelinePanel === "function") refreshPipelinePanel();
+    }).catch((err) => {
+      el.value = previousValue;
+      alert(err.message);
+    });
+  }
 });
 
 // ---------------------------------------------------------------- inspiration / comments / assets

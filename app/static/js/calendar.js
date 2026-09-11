@@ -267,5 +267,19 @@ function initCalendarFilterPanel() {
   updateCalFilterBadges();
 }
 
+/* Sept, per Jodie: a person's filter dropdown is a native <details> pill —
+   left alone, that only closes when you click the summary (their name)
+   again, which she doesn't otherwise need to touch once she's toggled a
+   checkbox inside it. Close it for her automatically on any click outside
+   the currently-open one(s), same as any other dropdown/menu would. */
+function initCalendarFilterAutoClose() {
+  document.addEventListener("click", (e) => {
+    document.querySelectorAll(".cal-filter-person[open]").forEach(details => {
+      if (!details.contains(e.target)) details.removeAttribute("open");
+    });
+  });
+}
+
 initCalendarFilterPanel();
+initCalendarFilterAutoClose();
 applyCalendarFilters();

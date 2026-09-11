@@ -110,17 +110,20 @@ function categoryOfType(typeId) {
 }
 
 function editIdeaFormHtml(idea) {
+  const scheduled = !!idea.scheduled_campaign_id;
   const category = categoryOfType(idea.content_type_id);
   const monthly = window.TGN_MONTHLY_TYPES || [];
   const filler = window.TGN_FILLER_TYPES || [];
   const targeted = window.TGN_TARGETED_TYPES || [];
-  return `
-    <div class="modal-header"><strong>Edit idea</strong></div>
-    <div class="modal-body">
-      <form id="edit-idea-form">
-        <label class="field-label">Title</label>
-        <input class="field-input" id="ei-title" value="${(idea.title || "").replace(/"/g, "&quot;")}" style="margin-bottom:12px;" required>
+  const allTypes = window.TGN_CONTENT_TYPES || [];
+  const currentTypeLabel = (allTypes.find(t => String(t.id) === String(idea.content_type_id)) || {}).label;
 
+  const typeSectionHtml = scheduled ? `
+        <div class="page-subtitle" style="margin-bottom:12px;">
+          ${currentTypeLabel ? `Scheduled as <strong>${currentTypeLabel}</strong> → ${(idea.campaign_title || "").replace(/</g, "&lt;")}.` : `Already scheduled → ${(idea.campaign_title || "").replace(/</g, "&lt;")}.`}
+          Renaming or adding notes here updates that calendar item too. To change its type, delete it and re-add it as a new idea.
+        </div>
+      ` : `
         <label class="field-label">Content type</label>
         <select class="field-select" id="ei-category" style="margin-bottom:8px;">
           <option value="" ${!category ? "selected" : ""}>— Untagged —</option>
@@ -139,6 +142,16 @@ function editIdeaFormHtml(idea) {
           <option value="">Which type of Filler post?</option>
           ${typeOptionsHtml(filler, idea.content_type_id)}
         </select>
+      `;
+
+  return `
+    <div class="modal-header"><strong>Edit idea</strong></div>
+    <div class="modal-body">
+      <form id="edit-idea-form">
+        <label class="field-label">Title</label>
+        <input class="field-input" id="ei-title" value="${(idea.title || "").replace(/"/g, "&quot;")}" style="margin-bottom:12px;" required>
+
+        ${typeSectionHtml}
 
         <label class="field-label">Notes</label>
         <textarea class="field-input" id="ei-notes" rows="3" style="margin-bottom:12px;">${idea.notes || ""}</textarea>
@@ -155,6 +168,7 @@ function editIdeaFormHtml(idea) {
 
 function wireCategoryToggle() {
   const categorySelect = document.getElementById("ei-category");
+  if (!categorySelect) return; // scheduled idea — type section is read-only, nothing to wire
   const groups = {
     targeted: document.getElementById("ei-type-targeted"),
     monthly: document.getElementById("ei-type-monthly"),
@@ -169,7 +183,7 @@ function wireCategoryToggle() {
 
 function selectedTypeId() {
   const categorySelect = document.getElementById("ei-category");
-  if (!categorySelect.value) return null;
+  if (!categorySelect || !categorySelect.value) return null;
   const el = document.getElementById(`ei-type-${categorySelect.value}`);
   const val = el ? el.value : "";
   return val ? parseInt(val, 10) : null;
@@ -178,20 +192,24 @@ function selectedTypeId() {
 async function openEditIdeaModal(ideaId) {
   const idea = (window.TGN_IDEAS_BY_ID || {})[ideaId];
   if (!idea) return;
+  const scheduled = !!idea.scheduled_campaign_id;
   openModal(editIdeaFormHtml(idea));
   wireCategoryToggle();
   document.getElementById("edit-idea-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const errBox = document.getElementById("ei-error");
     try {
+      const payload = {
+        title: document.getElementById("ei-title").value.trim(),
+        notes: document.getElementById("ei-notes").value,
+        links: document.getElementById("ei-links").value,
+      };
+      // A scheduled idea's type is locked to whatever it was scheduled as —
+      // no type selects were rendered, so there's nothing to read here.
+      if (!scheduled) payload.content_type_id = selectedTypeId();
       await tgnFetch(`/api/ideas/${ideaId}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          title: document.getElementById("ei-title").value.trim(),
-          notes: document.getElementById("ei-notes").value,
-          links: document.getElementById("ei-links").value,
-          content_type_id: selectedTypeId(),
-        }),
+        body: JSON.stringify(payload),
       });
       window.location.reload();
     } catch (err) {
