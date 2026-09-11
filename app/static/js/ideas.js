@@ -115,15 +115,20 @@ function editIdeaFormHtml(idea) {
   const monthly = window.TGN_MONTHLY_TYPES || [];
   const filler = window.TGN_FILLER_TYPES || [];
   const targeted = window.TGN_TARGETED_TYPES || [];
-  const allTypes = window.TGN_CONTENT_TYPES || [];
-  const currentTypeLabel = (allTypes.find(t => String(t.id) === String(idea.content_type_id)) || {}).label;
 
-  const typeSectionHtml = scheduled ? `
-        <div class="page-subtitle" style="margin-bottom:12px;">
-          ${currentTypeLabel ? `Scheduled as <strong>${currentTypeLabel}</strong> → ${(idea.campaign_title || "").replace(/</g, "&lt;")}.` : `Already scheduled → ${(idea.campaign_title || "").replace(/</g, "&lt;")}.`}
-          Renaming or adding notes here updates that calendar item too. To change its type, delete it and re-add it as a new idea.
+  // Sept, per Jodie: a scheduled idea's type used to be locked for good —
+  // now it's editable here too, it just means something extra happens on
+  // save (see openEditIdeaModal below): changing it releases the idea's
+  // CURRENT calendar slot back to blank and tries to place it into a new
+  // one under the new type, same as a freshly-tagged idea would be.
+  const scheduledNote = scheduled ? `
+        <div class="page-subtitle" style="margin-bottom:8px;">
+          Currently on the calendar as <strong>${(idea.campaign_title || "").replace(/</g, "&lt;")}</strong>. Renaming or adding notes keeps that in sync. Changing the type below moves it off that slot and re-places it under the new type (into another open slot right away, or back to Unscheduled to wait for one).
         </div>
-      ` : `
+      ` : "";
+
+  const typeSectionHtml = `
+        ${scheduledNote}
         <label class="field-label">Content type</label>
         <select class="field-select" id="ei-category" style="margin-bottom:8px;">
           <option value="" ${!category ? "selected" : ""}>— Untagged —</option>
@@ -199,14 +204,17 @@ async function openEditIdeaModal(ideaId) {
     e.preventDefault();
     const errBox = document.getElementById("ei-error");
     try {
+      const newTypeId = selectedTypeId();
+      if (scheduled && String(newTypeId || "") !== String(idea.content_type_id || "")) {
+        const proceed = confirm("Changing the type moves this off its current calendar slot and re-places it under the new type — into another open slot right away if one's free, or back to Unscheduled to wait for one. Continue?");
+        if (!proceed) return;
+      }
       const payload = {
         title: document.getElementById("ei-title").value.trim(),
+        content_type_id: newTypeId,
         notes: document.getElementById("ei-notes").value,
         links: document.getElementById("ei-links").value,
       };
-      // A scheduled idea's type is locked to whatever it was scheduled as —
-      // no type selects were rendered, so there's nothing to read here.
-      if (!scheduled) payload.content_type_id = selectedTypeId();
       await tgnFetch(`/api/ideas/${ideaId}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
