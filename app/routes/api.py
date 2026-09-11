@@ -514,17 +514,33 @@ IDEA_EDITABLE_FIELDS = {"title", "notes", "links", "content_type_id"}
 @bp.route("/ideas/<int:idea_id>", methods=["PATCH"])
 @login_required
 def update_idea(idea_id):
-    idea = db.query_one("SELECT id FROM content_ideas WHERE id = ?", (idea_id,))
+    idea = db.row_to_dict(db.query_one("SELECT * FROM content_ideas WHERE id = ?", (idea_id,)))
     if not idea:
         return jsonify({"error": "Not found"}), 404
     data = request.get_json(force=True)
     fields = {k: v for k, v in data.items() if k in IDEA_EDITABLE_FIELDS}
+    # An idea that's already been scheduled has its type locked in by the
+    # calendar slot it filled — the edit modal doesn't offer a type picker
+    # for it (see ideas.js), but guard here too against a stray/direct call.
+    if idea.get("scheduled_campaign_id"):
+        fields.pop("content_type_id", None)
     if not fields:
         return jsonify({"ok": True})
     set_clause = ", ".join(f"{k} = ?" for k in fields)
     db.execute(f"UPDATE content_ideas SET {set_clause} WHERE id = ?", (*fields.values(), idea_id))
-    if "content_type_id" in fields and fields["content_type_id"]:
-        fresh_idea = db.row_to_dict(db.query_one("SELECT * FROM content_ideas WHERE id = ?", (idea_id,)))
+    fresh_idea = db.row_to_dict(db.query_one("SELECT * FROM content_ideas WHERE id = ?", (idea_id,)))
+    if idea.get("scheduled_campaign_id"):
+        # Sept, per Jodie: renaming or adding to an idea after it's already
+        # been scheduled should keep the calendar item in sync — not leave
+        # editing the idea as a dead end once it's on the calendar.
+        campaign_updates = {}
+        if "title" in fields:
+            campaign_updates["title"] = fresh_idea["title"]
+        if "notes" in fields or "links" in fields:
+            campaign_updates["notes"] = content_module.idea_notes_with_links(fresh_idea)
+        if campaign_updates:
+            content_module.update_campaign_fields(idea["scheduled_campaign_id"], campaign_updates)
+    elif "content_type_id" in fields and fields["content_type_id"]:
         content_module._backfill_idea_into_placeholder_slot(fresh_idea)
     return jsonify({"ok": True})
 
