@@ -64,7 +64,7 @@
 <div class="section-title">Recently scheduled from ideas</div>
 <div class="card">
   {% for s in scheduled %}
-  <div class="list-row" style="cursor:default;">
+  <div class="list-row js-open-idea" style="cursor:pointer;" data-idea-id="{{ s.id }}">
     <div style="flex:1;"><strong>{{ s.title }}</strong> → {{ s.campaign_title }}
       <div class="page-subtitle" style="margin:0;">{{ s.publish_date|friendly_date_long }}</div>
     </div>
@@ -83,7 +83,7 @@ window.TGN_CONTENT_TYPES = {{ content_types|tojson }};
 window.TGN_MONTHLY_TYPES = {{ monthly_types|tojson }};
 window.TGN_FILLER_TYPES = {{ filler_types|tojson }};
 window.TGN_TARGETED_TYPES = {{ targeted_types|tojson }};
-window.TGN_IDEAS_BY_ID = {{ ideas|tojson }}.reduce((acc, i) => { acc[i.id] = i; return acc; }, {});
+window.TGN_IDEAS_BY_ID = {{ (ideas + scheduled)|tojson }}.reduce((acc, i) => { acc[i.id] = i; return acc; }, {});
 </script>
 <script src="{{ url_for('static', filename='js/ideas.js') }}"></script>
 {% endblock %}
