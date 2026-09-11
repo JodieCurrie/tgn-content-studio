@@ -519,17 +519,49 @@ def update_idea(idea_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json(force=True)
     fields = {k: v for k, v in data.items() if k in IDEA_EDITABLE_FIELDS}
-    # An idea that's already been scheduled has its type locked in by the
-    # calendar slot it filled — the edit modal doesn't offer a type picker
-    # for it (see ideas.js), but guard here too against a stray/direct call.
-    if idea.get("scheduled_campaign_id"):
-        fields.pop("content_type_id", None)
+
+    scheduled_campaign_id = idea.get("scheduled_campaign_id")
+    retyping = False
+    if scheduled_campaign_id and "content_type_id" in fields:
+        if fields["content_type_id"] == idea.get("content_type_id"):
+            fields.pop("content_type_id", None)  # unchanged — nothing to do
+        else:
+            # Sept, per Jodie: a scheduled idea's type used to be locked for
+            # good (delete + re-add was the only way to retag it). Retyping
+            # now releases its current calendar slot back to a blank
+            # placeholder — exactly like deleting it would — then re-places
+            # it under the new type below, once the rest of this idea's own
+            # fields (title/notes/links) have been saved.
+            campaign = db.row_to_dict(db.query_one("SELECT * FROM campaigns WHERE id = ?", (scheduled_campaign_id,)))
+            if campaign and campaign["publish_date"] < date.today().isoformat():
+                return jsonify({"error": "Can't change the type — this has already gone out."}), 400
+            # Release the CURRENT slot back to a blank placeholder now, using
+            # the idea's OLD data — same reversal deleting it would do. Don't
+            # touch content_ideas.scheduled_campaign_id or sweep for a new
+            # slot yet: that has to wait until AFTER this idea's own row
+            # carries its NEW type (below), or the sweep would immediately
+            # place it right back under its OLD type into the very slot it
+            # just vacated.
+            content_module.unschedule_idea(idea)
+            retyping = True
+
     if not fields:
         return jsonify({"ok": True})
     set_clause = ", ".join(f"{k} = ?" for k in fields)
     db.execute(f"UPDATE content_ideas SET {set_clause} WHERE id = ?", (*fields.values(), idea_id))
+    if retyping:
+        db.execute("UPDATE content_ideas SET scheduled_campaign_id = NULL WHERE id = ?", (idea_id,))
     fresh_idea = db.row_to_dict(db.query_one("SELECT * FROM content_ideas WHERE id = ?", (idea_id,)))
-    if idea.get("scheduled_campaign_id"):
+
+    if retyping:
+        # NOW re-place it — into another open matching slot under its NEW
+        # type right away if one's free, otherwise it sits in Unscheduled to
+        # wait for one. Runs the full sweep (not just this one idea) so the
+        # slot just freed up can also go to another idea that was already
+        # waiting on the OLD type, in the same first-come order
+        # backfill_unscheduled_ideas() always uses.
+        content_module.backfill_unscheduled_ideas()
+    elif scheduled_campaign_id:
         # Sept, per Jodie: renaming or adding to an idea after it's already
         # been scheduled should keep the calendar item in sync — not leave
         # editing the idea as a dead end once it's on the calendar.
@@ -539,7 +571,7 @@ def update_idea(idea_id):
         if "notes" in fields or "links" in fields:
             campaign_updates["notes"] = content_module.idea_notes_with_links(fresh_idea)
         if campaign_updates:
-            content_module.update_campaign_fields(idea["scheduled_campaign_id"], campaign_updates)
+            content_module.update_campaign_fields(scheduled_campaign_id, campaign_updates)
     elif "content_type_id" in fields and fields["content_type_id"]:
         content_module._backfill_idea_into_placeholder_slot(fresh_idea)
     return jsonify({"ok": True})
