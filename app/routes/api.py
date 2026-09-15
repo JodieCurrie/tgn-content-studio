@@ -686,3 +686,17 @@ def push_test():
     if not sent:
         return jsonify({"error": "That didn't go through — try re-enabling notifications."}), 400
     return jsonify({"ok": True, "sent": sent})
+
+
+@bp.route("/push/delay-reminder", methods=["POST"])
+@login_required
+def push_delay_reminder():
+    """Hit by the service worker itself when someone taps "delay to next
+    best time" on a reminder notification (see service-worker.js's
+    notificationclick handler) — not a page the person ever visits."""
+    data = request.get_json(force=True) or {}
+    output_id = data.get("output_id")
+    if not output_id:
+        return jsonify({"ok": False, "message": "Missing output_id."}), 400
+    result = push_module.delay_reminder(output_id)
+    return jsonify(result)
