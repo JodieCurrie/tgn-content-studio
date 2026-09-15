@@ -1,6 +1,8 @@
 from datetime import date, datetime
 from flask import g
 
+from . import push as push_module
+
 
 def register(app):
     @app.context_processor
@@ -9,6 +11,7 @@ def register(app):
             "current_user": getattr(g, "user", None),
             "today": date.today(),
             "pending_pipeline_confirmations": getattr(g, "pending_pipeline_confirmations", []),
+            "push_public_key": push_module.vapid_public_key(),
         }
 
     @app.template_filter("friendly_date")

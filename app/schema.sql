@@ -375,6 +375,27 @@ CREATE TABLE IF NOT EXISTS social_snapshots (
     extra           TEXT NOT NULL DEFAULT '{}'  -- JSON: platform-specific extras (video_count, recent videos, ...)
 );
 
+-- ---------------------------------------------------------------------------
+-- Web push subscriptions (Sept) — one row per browser/device a user has
+-- turned notifications on from (the same person can have their phone AND
+-- their laptop subscribed at once). `endpoint` is the browser-issued push
+-- URL and is globally unique — re-subscribing the same device just
+-- updates its keys in place rather than creating a duplicate row. See
+-- app/push.py for how these get used (daily "post due today, here's the
+-- best time to post it" reminders via app/static/js/service-worker.js).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint        TEXT NOT NULL UNIQUE,
+    p256dh          TEXT NOT NULL,
+    auth            TEXT NOT NULL,
+    user_agent      TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
+
 CREATE INDEX IF NOT EXISTS idx_social_snapshots_platform_captured ON social_snapshots(platform, captured_at);
 
 CREATE INDEX IF NOT EXISTS idx_campaigns_publish_date ON campaigns(publish_date);

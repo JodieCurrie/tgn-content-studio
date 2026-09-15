@@ -40,7 +40,7 @@ def create_app(test_config=None):
     db_module.init_db(app.config["DATABASE_PATH"])
 
     from . import auth
-    from .routes import calendar, content, tasks, dashboard, admin, api, ideas
+    from .routes import calendar, content, tasks, dashboard, admin, api, ideas, cron
 
     app.register_blueprint(auth.bp)
     app.register_blueprint(calendar.bp)
@@ -50,6 +50,7 @@ def create_app(test_config=None):
     app.register_blueprint(admin.bp)
     app.register_blueprint(api.bp)
     app.register_blueprint(ideas.bp)
+    app.register_blueprint(cron.bp)
 
     from . import template_helpers
     template_helpers.register(app)
@@ -64,5 +65,17 @@ def create_app(test_config=None):
         return login_required(
             lambda: send_from_directory(current_app.config["UPLOAD_FOLDER"], filename)
         )()
+
+    # Served at the site root (not /static/service-worker.js) on purpose:
+    # a service worker's default control scope is limited to the URL
+    # directory it's served from, and the whole app needs to be in scope
+    # for push notifications to work from any page, not just /static/.
+    @app.route("/service-worker.js")
+    def service_worker():
+        static_dir = Path(app.root_path) / "static" / "js"
+        response = send_from_directory(static_dir, "service-worker.js")
+        response.headers["Content-Type"] = "application/javascript"
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
     return app

@@ -84,6 +84,12 @@ _COLUMN_MIGRATIONS = [
     ("campaigns", "script_youtube", "TEXT NOT NULL DEFAULT ''"),
     ("content_ideas", "content_type_id", "INTEGER REFERENCES content_types(id)"),
     ("content_ideas", "links", "TEXT NOT NULL DEFAULT ''"),
+    # Push notifications (Sept) — see app/push.py. Marks an output as
+    # already reminded-about so the daily cron never double-sends; a
+    # brand-new table (push_subscriptions) is created straight from
+    # schema.sql above, but this column has to go through the migration
+    # path since content_outputs already exists in production.
+    ("content_outputs", "reminder_sent_at", "TEXT"),
 ]
 
 
