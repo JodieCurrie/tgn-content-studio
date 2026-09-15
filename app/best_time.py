@@ -16,32 +16,102 @@ this is the one place to swap in the real numbers.
 (see pipeline.py's _parse_dt docstring), there's no real timezone
 conversion infrastructure, just a single LOCAL_TIMEZONE app/push.py
 converts against once, right before comparing to "now."
+
+Each platform now carries a short ORDERED LIST of candidate windows
+(primary first) instead of a single time, so a reminder can offer
+"delay to next best suggested time" — see app/push.py's delay_reminder.
 """
 
-# key -> (hour 0-23, minute, one-line reason shown in the notification)
+# key -> ordered list of (hour 0-23, minute, one-line reason), earliest-first
 PLATFORM_BEST_TIMES = {
-    "instagram": (11, 0, "Late morning tends to catch the most scroll time."),
-    "tiktok": (19, 0, "Evening is TikTok's biggest engagement window."),
-    "facebook": (13, 0, "Early afternoon is Facebook's typical peak."),
-    "threads": (11, 0, "Same late-morning window as Instagram."),
-    "youtube": (15, 0, "Afternoon, ahead of the evening viewing rush."),
-    "youtube_shorts": (12, 0, "Midday catches the lunch-break scroll."),
-    "website": (9, 0, "Morning, when blog traffic tends to peak."),
-    "podcast": (7, 0, "Morning commute is podcasts' biggest window."),
+    "instagram": [
+        (11, 0, "Late morning tends to catch the most scroll time."),
+        (13, 0, "Early afternoon is a solid secondary window."),
+        (19, 0, "Evening catches the after-work scroll too."),
+    ],
+    "tiktok": [
+        (12, 0, "Midday lunch-break scroll is a good secondary window."),
+        (19, 0, "Evening is TikTok's biggest engagement window."),
+        (21, 0, "Late evening catches night-owl scrolling."),
+    ],
+    "facebook": [
+        (9, 0, "Morning catches people checking Facebook before work."),
+        (13, 0, "Early afternoon is Facebook's typical peak."),
+        (20, 0, "Evening is a secondary peak once people are home."),
+    ],
+    "threads": [
+        (11, 0, "Same late-morning window as Instagram."),
+        (19, 0, "Evening is a secondary window, mirroring Instagram's."),
+    ],
+    "youtube": [
+        (15, 0, "Afternoon, ahead of the evening viewing rush."),
+        (19, 0, "Evening catches the prime-time viewing window."),
+    ],
+    "youtube_shorts": [
+        (12, 0, "Midday catches the lunch-break scroll."),
+        (18, 0, "Early evening is a secondary peak."),
+    ],
+    "website": [
+        (9, 0, "Morning, when blog traffic tends to peak."),
+        (13, 0, "Early afternoon is a secondary traffic bump."),
+    ],
+    "podcast": [
+        (7, 0, "Morning commute is podcasts' biggest window."),
+        (17, 0, "Evening commute is a secondary window."),
+    ],
 }
 
-DEFAULT_BEST_TIME = (11, 0, "General late-morning posting window.")
+DEFAULT_BEST_TIMES = [
+    (11, 0, "General late-morning posting window."),
+    (15, 0, "General afternoon posting window."),
+]
+
+
+def best_time_candidates_for_platforms(platform_keys):
+    """All candidate (hour, minute, reason) windows across an output's
+    platforms, earliest-first, de-duplicated by clock time. This is the
+    full menu a reminder can step through via "delay to next best time."
+    Falls back to a sane generic pair of windows for a type with no
+    platforms attached (or none we have rules for)."""
+    seen = {}
+    for key in platform_keys:
+        for hour, minute, reason in PLATFORM_BEST_TIMES.get(key, []):
+            seen.setdefault((hour, minute), reason)
+    if not seen:
+        for hour, minute, reason in DEFAULT_BEST_TIMES:
+            seen.setdefault((hour, minute), reason)
+    return sorted(((h, m, r) for (h, m), r in seen.items()), key=lambda t: (t[0], t[1]))
 
 
 def best_time_for_platforms(platform_keys):
-    """Picks the EARLIEST recommended hour among an output's platforms —
-    post before any of its windows opens rather than after some of them
-    have already closed. Falls back to a sane default for a type with no
-    platforms attached (or none we have a rule for)."""
-    candidates = [PLATFORM_BEST_TIMES[k] for k in platform_keys if k in PLATFORM_BEST_TIMES]
-    if not candidates:
-        return DEFAULT_BEST_TIME
-    return min(candidates, key=lambda t: (t[0], t[1]))
+    """The single earliest recommended window — post before any of its
+    platforms' windows opens rather than after some have already closed.
+    Kept as a convenience wrapper around best_time_candidates_for_platforms."""
+    return best_time_candidates_for_platforms(platform_keys)[0]
+
+
+def next_candidate_after(hour, minute, platform_keys):
+    """The next candidate window strictly later than (hour, minute), or
+    None if that was already the last one today. Used by "delay to next
+    best suggested time" — advances through the same ordered list a
+    reminder's initial pick came from."""
+    for cand_hour, cand_minute, reason in best_time_candidates_for_platforms(platform_keys):
+        if (cand_hour, cand_minute) > (hour, minute):
+            return (cand_hour, cand_minute, reason)
+    return None
+
+
+def reason_for(hour, minute, platform_keys):
+    """Looks up the reason text for a specific (hour, minute) among an
+    output's candidates — used when re-displaying a previously-computed
+    or delayed-to target whose reason wasn't stored verbatim. Falls back
+    to a generic line if the exact slot isn't one of the rule-based ones
+    (shouldn't normally happen, since targets always come from this
+    module's own candidate lists)."""
+    for cand_hour, cand_minute, reason in best_time_candidates_for_platforms(platform_keys):
+        if (cand_hour, cand_minute) == (hour, minute):
+            return reason
+    return "Next best posting window today."
 
 
 def format_time_label(hour, minute):

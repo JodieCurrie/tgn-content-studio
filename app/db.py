@@ -90,6 +90,12 @@ _COLUMN_MIGRATIONS = [
     # schema.sql above, but this column has to go through the migration
     # path since content_outputs already exists in production.
     ("content_outputs", "reminder_sent_at", "TEXT"),
+    # The currently-active recommended posting slot for today's reminder,
+    # stored as "HH:MM" (local, 24h). Set the first time a due-today
+    # output is swept; "delay to next best suggested time" advances it
+    # and clears reminder_sent_at above so the sweep fires again ~10
+    # minutes before the new slot. See app/push.py / app/best_time.py.
+    ("content_outputs", "reminder_target_time", "TEXT"),
 ]
 
 
