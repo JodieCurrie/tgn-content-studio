@@ -21,4 +21,32 @@
     <button class="btn btn-primary" type="submit">Update password</button>
   </form>
 </div>
+
+<div class="card card-pad" style="max-width:480px; margin-top:20px;">
+  <h3 style="margin-top:0;">Notifications</h3>
+  <div class="page-subtitle" style="margin-bottom:14px;">
+    A phone notification on the day each post is due, telling you what it is and the best time to post it — no email. Works best once you've added this site to your home screen (below), so it can notify you even when the app isn't open.
+  </div>
+  <div id="push-status-text" class="page-subtitle" style="margin-bottom:12px;">Checking…</div>
+  <button class="btn btn-primary" id="js-enable-push" type="button" style="display:none;">🔔 Turn on notifications</button>
+  <button class="btn btn-outline" id="js-disable-push" type="button" style="display:none;">Turn off notifications</button>
+  <button class="btn btn-outline" id="js-test-push" type="button" style="display:none; margin-left:8px;">Send a test notification</button>
+  <div id="push-test-result" class="page-subtitle" style="display:none; margin-top:10px;"></div>
+</div>
+
+<div class="card card-pad" style="max-width:480px; margin-top:20px;">
+  <h3 style="margin-top:0;">Add to your home screen</h3>
+  <div class="page-subtitle" style="margin-bottom:12px;">
+    Installing TGN Content Studio on your phone gets you a home-screen icon that opens straight into it, full-screen, like any other app — everything you can already do here (add ideas, move posts, block off days, schedule) works exactly the same way from there.
+  </div>
+  <button class="btn btn-primary" id="js-install-app" type="button" style="display:none; margin-bottom:12px;">📲 Install app</button>
+  <details>
+    <summary style="cursor:pointer; font-weight:600;">iPhone / iPad instructions</summary>
+    <div class="page-subtitle" style="margin-top:8px;">Open this site in Safari, tap the Share icon, then "Add to Home Screen."</div>
+  </details>
+  <details style="margin-top:8px;">
+    <summary style="cursor:pointer; font-weight:600;">Android instructions</summary>
+    <div class="page-subtitle" style="margin-top:8px;">Tap "Install app" above, or open the browser menu (⋮) and choose "Add to Home screen" / "Install app."</div>
+  </details>
+</div>
 {% endblock %}
