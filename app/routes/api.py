@@ -12,6 +12,7 @@ from .. import scheduling
 from .. import task_engine
 from .. import analytics
 from .. import pipeline
+from .. import push as push_module
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -630,3 +631,58 @@ def warnings():
         "warnings": analytics.warnings_for_week(),
         "suggestions": [dict(s) for s in analytics.suggest_filler()],
     })
+
+
+# ---------------------------------------------------------------------- push notifications
+@bp.route("/push/subscribe", methods=["POST"])
+@login_required
+def push_subscribe():
+    data = request.get_json(force=True) or {}
+    endpoint = (data.get("endpoint") or "").strip()
+    keys = data.get("keys") or {}
+    p256dh = (keys.get("p256dh") or "").strip()
+    auth = (keys.get("auth") or "").strip()
+    if not endpoint or not p256dh or not auth:
+        return jsonify({"error": "That subscription looked incomplete — try enabling notifications again."}), 400
+    push_module.save_subscription(
+        g.user["id"], endpoint, p256dh, auth,
+        user_agent=request.headers.get("User-Agent", "")[:255],
+    )
+    return jsonify({"ok": True})
+
+
+@bp.route("/push/unsubscribe", methods=["POST"])
+@login_required
+def push_unsubscribe():
+    data = request.get_json(force=True) or {}
+    endpoint = (data.get("endpoint") or "").strip()
+    if endpoint:
+        push_module.remove_subscription(endpoint)
+    return jsonify({"ok": True})
+
+
+@bp.route("/push/status")
+@login_required
+def push_status():
+    return jsonify({
+        "subscribed": push_module.has_subscription(g.user["id"]),
+        "configured": push_module.push_configured(),
+        "public_key": push_module.vapid_public_key(),
+    })
+
+
+@bp.route("/push/test", methods=["POST"])
+@login_required
+def push_test():
+    if not push_module.push_configured():
+        return jsonify({"error": "Push isn't fully set up on the server yet (missing VAPID keys)."}), 400
+    if not push_module.has_subscription(g.user["id"]):
+        return jsonify({"error": "Turn on notifications first, then send yourself a test."}), 400
+    sent = push_module.send_to_user(
+        g.user["id"], "Test notification",
+        "If you can see this, TGN Content Studio notifications are working.",
+        url="/", tag="tgn-test",
+    )
+    if not sent:
+        return jsonify({"error": "That didn't go through — try re-enabling notifications."}), 400
+    return jsonify({"ok": True, "sent": sent})
