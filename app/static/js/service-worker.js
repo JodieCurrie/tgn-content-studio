@@ -40,14 +40,55 @@ self.addEventListener("push", (event) => {
       icon: "/static/icons/icon-192.png",
       badge: "/static/icons/badge-96.png",
       tag: payload.tag || "tgn-notification",
-      data: { url: payload.url || "/" },
+      // actions is what puts a real button ("Delay to next best time")
+      // on a reminder notification — only post-due reminders include
+      // one (see app/push.py's send_post_reminders). Not supported on
+      // iOS Safari: there, tapping the notification just opens the app,
+      // same as any notification without actions.
+      actions: payload.actions || [],
+      data: { url: payload.url || "/", output_id: payload.output_id || null },
     })
   );
 });
 
 self.addEventListener("notificationclick", (event) => {
-  event.notification.close();
   const targetUrl = (event.notification.data && event.notification.data.url) || "/";
+  const outputId = event.notification.data && event.notification.data.output_id;
+  event.notification.close();
+
+  if (event.action === "delay" && outputId) {
+    // Snooze this reminder to its next suggested time — no need to open
+    // the app for this, just tell the server and show what happened.
+    event.waitUntil(
+      fetch("/api/push/delay-reminder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ output_id: outputId }),
+      })
+        .then((res) => res.json())
+        .then((result) => {
+          const message = result.message || (result.ok ? "Delayed." : "Couldn't delay that reminder.");
+          return self.registration.showNotification("TGN Content Studio", {
+            body: message,
+            icon: "/static/icons/icon-192.png",
+            badge: "/static/icons/badge-96.png",
+            tag: event.notification.tag,
+            data: { url: targetUrl },
+          });
+        })
+        .catch(() =>
+          self.registration.showNotification("TGN Content Studio", {
+            body: "Couldn't reach the server to delay that reminder — try again from the app.",
+            icon: "/static/icons/icon-192.png",
+            tag: event.notification.tag,
+            data: { url: targetUrl },
+          })
+        )
+    );
+    return;
+  }
+
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientsArr) => {
       for (const client of clientsArr) {
