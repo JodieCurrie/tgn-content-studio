@@ -175,6 +175,54 @@ file yourself from the Shell tab at any time. Ask me to add a scheduled
 backup-to-email/Drive step once you're live if you want extra peace of
 mind.
 
+## Notifications (installable on your phone, push reminders)
+
+The app is a Progressive Web App: open it in your phone's browser, add it
+to your home screen, and it opens full-screen like a normal app — same
+login, same everything (adding ideas, moving posts, blocking off days as
+custom events, scheduling) as the desktop site.
+
+On top of that, it can push a notification to your phone the day each
+post is due, telling you what it is and a suggested best time to post it
+(a general best-practice time per platform — see `app/best_time.py` —
+not real per-account analytics, since TGN isn't connected to
+Instagram/TikTok/Facebook's own APIs). No email involved, by request.
+
+**Installing on a phone:**
+- iPhone/iPad: open the site in Safari → Share icon → "Add to Home Screen."
+- Android: open the site in Chrome → menu (⋮) → "Add to Home screen" /
+  "Install app" (or use the "Install app" button on the Account page,
+  which shows up automatically when the browser offers it).
+
+**One-time setup for push to work at all (an admin does this once):**
+1. From Render's Shell tab, run `python scripts/generate_vapid_keys.py`
+   and copy the two lines it prints.
+2. On the web service, add environment variables:
+   - `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` — from step 1.
+   - `VAPID_CLAIM_EMAIL` — any address you check (identifies the sender
+     to Apple/Google/Mozilla's push servers, they don't email it).
+   - `CRON_SECRET` — any long random string (generate one the same way
+     as `SECRET_KEY`). This is what proves the daily reminder job is
+     allowed to run.
+   - `LOCAL_TIMEZONE` — an IANA name, e.g. `America/New_York`. Defaults
+     to that if you skip it.
+3. Redeploy so those take effect, then have everyone who wants
+   notifications visit Account → Notifications → "Turn on notifications"
+   (once, per device).
+4. Create the daily reminder job — Render → New → Cron Job, same repo:
+   - Build command: `pip install -r requirements.txt`
+   - Schedule: `0 12 * * *` (that's noon UTC — roughly 7–8am Eastern,
+     adjust the hour for your timezone/DST preference)
+   - Command: `curl -sf -X POST -H "X-Cron-Secret: $CRON_SECRET" https://<your-app>.onrender.com/internal/send-post-reminders`
+   - Add the same `CRON_SECRET` value as an environment variable on this
+     Cron Job too (it's a separate service from the web app, so it needs
+     its own copy).
+
+Test it any time without waiting for the schedule: Account → Notifications
+→ "Send a test notification" sends yourself one immediately. To test the
+real daily sweep, run that same `curl` command by hand from Render's
+Shell tab.
+
 ## Coming back to improve it
 
 This is meant to be maintained, not shipped once and abandoned. Come back
