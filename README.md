@@ -182,11 +182,22 @@ to your home screen, and it opens full-screen like a normal app — same
 login, same everything (adding ideas, moving posts, blocking off days as
 custom events, scheduling) as the desktop site.
 
-On top of that, it can push a notification to your phone the day each
-post is due, telling you what it is and a suggested best time to post it
-(a general best-practice time per platform — see `app/best_time.py` —
-not real per-account analytics, since TGN isn't connected to
-Instagram/TikTok/Facebook's own APIs). No email involved, by request.
+On top of that, it can push a notification to your phone shortly before
+each due post's suggested best time to post it — about 10 minutes ahead,
+not first thing in the morning — telling you what it is and why that
+window (a general best-practice time per platform — see
+`app/best_time.py` — not real per-account analytics, since TGN isn't
+connected to Instagram/TikTok/Facebook's own APIs). No email involved,
+by request.
+
+The notification itself has a **"Delay to next best time"** button —
+tap it and that post gets a fresh reminder ~10 minutes before its next
+suggested window instead (Instagram's, say: late morning, then early
+afternoon, then evening), without opening the app. That button only
+shows up on Android and desktop Chrome/Edge/Firefox — iOS Safari doesn't
+support action buttons on web push notifications, so on an iPhone
+tapping the notification just opens the app as normal, with no delay
+option on the notification itself.
 
 **Installing on a phone:**
 - iPhone/iPad: open the site in Safari → Share icon → "Add to Home Screen."
@@ -209,19 +220,28 @@ Instagram/TikTok/Facebook's own APIs). No email involved, by request.
 3. Redeploy so those take effect, then have everyone who wants
    notifications visit Account → Notifications → "Turn on notifications"
    (once, per device).
-4. Create the daily reminder job — Render → New → Cron Job, same repo:
+4. Create the reminder-sweep job — Render → New → Cron Job, same repo:
    - Build command: `pip install -r requirements.txt`
-   - Schedule: `0 12 * * *` (that's noon UTC — roughly 7–8am Eastern,
-     adjust the hour for your timezone/DST preference)
+   - Schedule: `*/5 * * * *` (every 5 minutes, all day) — it has to run
+     this often because a reminder now fires ~10 minutes before each
+     post's specific best time rather than once at a fixed hour, and a
+     5-minute cadence is what keeps that within 5-10 minutes of accurate.
+     Each run is a fast `curl` against a lightweight endpoint, so the
+     extra frequency costs a fraction of a cent a day on Render's
+     smallest compute plan.
    - Command: `curl -sf -X POST -H "X-Cron-Secret: $CRON_SECRET" https://<your-app>.onrender.com/internal/send-post-reminders`
    - Add the same `CRON_SECRET` value as an environment variable on this
      Cron Job too (it's a separate service from the web app, so it needs
      its own copy).
 
 Test it any time without waiting for the schedule: Account → Notifications
-→ "Send a test notification" sends yourself one immediately. To test the
-real daily sweep, run that same `curl` command by hand from Render's
-Shell tab.
+→ "Send a test notification" sends yourself one immediately (this one
+has no best-time timing or delay button — it's just a connectivity
+check). To test the real sweep, run that same `curl` command by hand
+from Render's Shell tab; it only actually sends once a due-today post's
+target time is within 10 minutes, so on other runs it'll report
+`"reminders_sent": 0` even with posts due today — that's expected, not
+a failure.
 
 ## Coming back to improve it
 
