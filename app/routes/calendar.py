@@ -212,10 +212,23 @@ def month_view():
     The month name is shown once per group of weeks in a vertical side rail,
     like Jodie's original Excel calendar, instead of a full-width divider."""
     today = date.today()
-    year = request.args.get("year", type=int) or today.year
-    month = request.args.get("month", type=int) or today.month
+    year_param = request.args.get("year", type=int)
+    month_param = request.args.get("month", type=int)
+    if year_param or month_param:
+        # An explicit jump (the month-picker, or a link carrying year/month)
+        # still opens on that month's own first week, as before.
+        year = year_param or today.year
+        month = month_param or today.month
+        start_sunday = _sunday_on_or_before(date(year, month, 1))
+    else:
+        # Default landing — including the "Today" link, which points here
+        # with no params — opens on THIS week, not the 1st of the current
+        # month (Sept, per Jodie: she wants to land where she actually is;
+        # month_fragment_before below lets her scroll up herself if she
+        # needs to see or adjust something earlier).
+        year, month = today.year, today.month
+        start_sunday = _sunday_on_or_before(today)
 
-    start_sunday = _sunday_on_or_before(date(year, month, 1))
     weeks = _continuous_weeks(start_sunday, INITIAL_WEEKS)
     segments = _segment_weeks(weeks)
     by_day = _outputs_by_day(weeks[0][0], weeks[-1][-1])
@@ -234,6 +247,7 @@ def month_view():
         deadlines_by_day=deadlines_by_day, today=today,
         jump_year=year, jump_month=month,
         next_from=next_from.isoformat(),
+        earliest_from=weeks[0][0].isoformat(),
         cont_year=segments[-1]["year"], cont_month=segments[-1]["month"],
         weekday_headers=WEEKDAY_HEADERS,
         legend_groups=legend_groups,
@@ -267,6 +281,49 @@ def month_fragment():
 
     weeks = _continuous_weeks(start_sunday, WEEKS_PER_FRAGMENT)
     segments = _segment_weeks(weeks, continues_year=cont_year, continues_month=cont_month)
+    by_day = _outputs_by_day(weeks[0][0], weeks[-1][-1])
+    meetings_by_day = _meetings_by_day(weeks[0][0], weeks[-1][-1])
+    deadlines_by_day = _deadlines_by_day(weeks[0][0], weeks[-1][-1])
+
+    return render_template(
+        "partials/calendar_month_fragment.html",
+        segments=segments, by_day=by_day, meetings_by_day=meetings_by_day,
+        deadlines_by_day=deadlines_by_day, today=date.today(),
+    )
+
+
+@bp.route("/calendar/month-fragment-before")
+@login_required
+def month_fragment_before():
+    """The symmetric counterpart to month_fragment, for scrolling UP (Sept,
+    per Jodie: she wants the calendar to open on the current week, with the
+    option to scroll up to earlier weeks rather than starting from the 1st
+    of the month). `before` must be the ISO Sunday of whatever week is
+    currently the earliest one rendered — calendar.js always hands back
+    exactly what this view (or a previous "before" batch) last reported as
+    `earliest_from`/the new earliest week, so weeks never skip or repeat
+    going backward either.
+
+    Segments here always carry their own month label — unlike month_fragment,
+    which can suppress a repeated label via `continues_year`/`continues_month`
+    because it always knows what's already above it. A backward fetch can't
+    know that server-side (there's no continuous "what's already rendered"
+    state), so when a fetched batch's month matches what's already at the
+    top of the page, calendar.js removes the now-redundant label from the
+    older element client-side instead."""
+    before_str = request.args.get("before")
+    if not before_str:
+        return "", 400
+    try:
+        earliest_sunday = date.fromisoformat(before_str)
+    except ValueError:
+        return "", 400
+    if earliest_sunday.weekday() != 6:  # Python Sunday = 6
+        return "", 400
+
+    start_sunday = earliest_sunday - timedelta(days=7 * WEEKS_PER_FRAGMENT)
+    weeks = _continuous_weeks(start_sunday, WEEKS_PER_FRAGMENT)
+    segments = _segment_weeks(weeks)
     by_day = _outputs_by_day(weeks[0][0], weeks[-1][-1])
     meetings_by_day = _meetings_by_day(weeks[0][0], weeks[-1][-1])
     deadlines_by_day = _deadlines_by_day(weeks[0][0], weeks[-1][-1])
