@@ -408,7 +408,15 @@ table.admin-table td { padding: 9px 10px; border-bottom: 1px solid var(--border)
 @media (max-width: 760px) {
   .app-shell { flex-direction: column; }
   .sidebar { width: 100%; flex-direction: row; align-items: center; overflow-x: auto; padding: 10px; }
-  .sidebar-section-label, .sidebar-footer { display: none; }
+  .sidebar-section-label { display: none; }
+  /* .sidebar-footer holds the only Account/Log out links in the app —
+     it used to be display:none here, which hid them completely on every
+     phone. Keep the footer's box out of the flow (display:contents) so
+     its two <a class="nav-link"> children flow into the horizontal nav
+     row like any other link, and hide just the non-interactive avatar/
+     name/role block, which wouldn't read well inline in a scroll row. */
+  .sidebar-footer { display: contents; }
+  .sidebar-user { display: none; }
   .sidebar-brand { padding: 6px 10px; }
   .main { padding: 16px; }
   .calendar-grid { grid-template-columns: 28px repeat(7, minmax(90px,1fr)); overflow-x: auto; }
