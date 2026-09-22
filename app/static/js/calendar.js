@@ -181,6 +181,75 @@ if (calendarSentinel && "IntersectionObserver" in window) {
   observer.observe(calendarSentinel);
 }
 
+/* Scrolling UP (Sept, per Jodie): the calendar now opens on the current
+   week rather than the 1st of the month, so this is what lets her still
+   get back to earlier weeks — same continuous-flow idea as scrolling down,
+   just fetching backward from whatever's currently the earliest-rendered
+   week and prepending it above. */
+const calendarSentinelTop = document.getElementById("calendar-sentinel-top");
+const calendarLoadingTop = document.getElementById("calendar-loading-top");
+let loadingPrevWeeks = false;
+
+async function loadPreviousCalendarWeeks() {
+  if (!calendarSentinelTop || loadingPrevWeeks) return;
+  loadingPrevWeeks = true;
+  if (calendarLoadingTop) calendarLoadingTop.style.display = "block";
+  const before = calendarSentinelTop.dataset.earliestFrom;
+  try {
+    const res = await fetch(`/calendar/month-fragment-before?before=${before}`);
+    if (!res.ok) return;
+    const html = await res.text();
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = html;
+    const newNodes = Array.from(wrapper.children);
+    if (!newNodes.length) return;
+
+    // A fetched-from-scratch batch always carries its own month label on
+    // every segment (the server has no idea what's already on screen). If
+    // the batch's LAST segment (the latest one, right up against what's
+    // already rendered) is the same month as what's currently the topmost
+    // rail, that existing rail's label is no longer the earliest
+    // occurrence of that month once we prepend — drop it so the name
+    // isn't shown twice back to back.
+    const newRails = newNodes.filter(n => n.classList && n.classList.contains("month-rail"));
+    const newLastRail = newRails[newRails.length - 1];
+    const existingTopRail = calendarGrid.querySelector(".month-rail");
+    if (newLastRail && existingTopRail
+        && newLastRail.dataset.year === existingTopRail.dataset.year
+        && newLastRail.dataset.month === existingTopRail.dataset.month) {
+      const staleLabel = existingTopRail.querySelector("span");
+      if (staleLabel) staleLabel.remove();
+    }
+
+    // Prepend right after the top sentinel, keeping scroll position
+    // stable — inserting content above the fold would otherwise shove the
+    // weeks Jodie's actually looking at further down the page. Each node
+    // is inserted right after the previous one just inserted, so the
+    // batch's own top-to-bottom (earliest-to-latest) order is preserved.
+    const prevHeight = calendarGrid.scrollHeight;
+    let insertAfter = calendarSentinelTop;
+    newNodes.forEach(node => {
+      insertAfter.after(node);
+      insertAfter = node;
+    });
+    const addedHeight = calendarGrid.scrollHeight - prevHeight;
+    window.scrollBy(0, addedHeight);
+
+    // matches WEEKS_PER_FRAGMENT in app/routes/calendar.py
+    calendarSentinelTop.dataset.earliestFrom = addDaysToIsoDate(before, -4 * 7);
+  } finally {
+    loadingPrevWeeks = false;
+    if (calendarLoadingTop) calendarLoadingTop.style.display = "none";
+  }
+}
+
+if (calendarSentinelTop && "IntersectionObserver" in window) {
+  const observerTop = new IntersectionObserver((entries) => {
+    entries.forEach(entry => { if (entry.isIntersecting) loadPreviousCalendarWeeks(); });
+  }, { rootMargin: "600px 0px 600px 0px" });
+  observerTop.observe(calendarSentinelTop);
+}
+
 /* Sept: calendar view filters (Month/Week/List) — "Posting Schedule" plus a
    per-person Custom Events / Deadlines checkbox. Purely client-side: every
    filterable element on the page carries data-filter-cat (+ data-filter-owner
