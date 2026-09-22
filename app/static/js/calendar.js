@@ -181,19 +181,30 @@ if (calendarSentinel && "IntersectionObserver" in window) {
   observer.observe(calendarSentinel);
 }
 
-/* Scrolling UP (Sept, per Jodie): the calendar now opens on the current
-   week rather than the 1st of the month, so this is what lets her still
-   get back to earlier weeks — same continuous-flow idea as scrolling down,
-   just fetching backward from whatever's currently the earliest-rendered
-   week and prepending it above. */
+/* Earlier weeks (Sept, per Jodie): the calendar opens on the current week
+   rather than the 1st of the month, so this is what lets her still get
+   back to earlier weeks. Rounds 1 and 2 tried to detect "she's scrolling
+   up toward the top" automatically (an IntersectionObserver, then a
+   scroll-direction-plus-proximity check) and both misfired on a phone: a
+   continuous touch-scroll gesture fires a flood of scroll events, and
+   every load inserted content and then scrolled back down to compensate
+   (see the scrollBy below) — which, mid-gesture, fought her own scrolling
+   and made reaching the actual top of the page feel endless. An explicit
+   button sidesteps the whole problem: plain scrolling, in any direction,
+   at any speed, never loads anything or moves the page on its own —
+   scrolling to the top always just reaches the top. Earlier weeks only
+   load on an actual tap. */
 const calendarSentinelTop = document.getElementById("calendar-sentinel-top");
-const calendarLoadingTop = document.getElementById("calendar-loading-top");
+const calendarLoadEarlierBtn = document.getElementById("calendar-load-earlier-btn");
 let loadingPrevWeeks = false;
 
 async function loadPreviousCalendarWeeks() {
   if (!calendarSentinelTop || loadingPrevWeeks) return;
   loadingPrevWeeks = true;
-  if (calendarLoadingTop) calendarLoadingTop.style.display = "block";
+  if (calendarLoadEarlierBtn) {
+    calendarLoadEarlierBtn.disabled = true;
+    calendarLoadEarlierBtn.textContent = "Loading…";
+  }
   const before = calendarSentinelTop.dataset.earliestFrom;
   try {
     const res = await fetch(`/calendar/month-fragment-before?before=${before}`);
@@ -221,68 +232,31 @@ async function loadPreviousCalendarWeeks() {
       if (staleLabel) staleLabel.remove();
     }
 
-    // Prepend right after the top sentinel, keeping scroll position
-    // stable — inserting content above the fold would otherwise shove the
-    // weeks Jodie's actually looking at further down the page. Each node
-    // is inserted right after the previous one just inserted, so the
-    // batch's own top-to-bottom (earliest-to-latest) order is preserved.
-    const prevHeight = calendarGrid.scrollHeight;
+    // Prepend right after the button/sentinel, which never moves — new
+    // weeks land right where she tapped, no forced scroll adjustment
+    // needed (that forced re-adjustment on every load was the source of
+    // the "fighting my scroll" problem with the old auto-triggered
+    // version). Each node is inserted right after the previous one just
+    // inserted, so the batch's own top-to-bottom (earliest-to-latest)
+    // order is preserved.
     let insertAfter = calendarSentinelTop;
     newNodes.forEach(node => {
       insertAfter.after(node);
       insertAfter = node;
     });
-    const addedHeight = calendarGrid.scrollHeight - prevHeight;
-    window.scrollBy(0, addedHeight);
 
     // matches WEEKS_PER_FRAGMENT in app/routes/calendar.py
     calendarSentinelTop.dataset.earliestFrom = addDaysToIsoDate(before, -4 * 7);
   } finally {
     loadingPrevWeeks = false;
-    if (calendarLoadingTop) calendarLoadingTop.style.display = "none";
+    if (calendarLoadEarlierBtn) {
+      calendarLoadEarlierBtn.disabled = false;
+      calendarLoadEarlierBtn.textContent = "↑ Load earlier weeks";
+    }
   }
 }
 
-if (calendarSentinelTop) {
-  // Sept, per Jodie (round 2): the current week has to stay put no matter
-  // which way she scrolls. An IntersectionObserver with a generous preload
-  // margin (matching the forward one, for a seamless feel) turned out to
-  // be too trigger-happy for this direction: a scroll of literally 1px in
-  // EITHER direction counts as "the sentinel is near the screen" the
-  // moment the page's header/toolbar/legend/filters are shorter than that
-  // margin — which they are on a phone — so even scrolling DOWN toward
-  // future weeks was yanking August in and shoving her current week away.
-  //
-  // Backward loading only makes sense while she's actually scrolling UP,
-  // so that's checked directly here instead of trusting "near the
-  // viewport" alone: track scroll direction on every scroll tick, and
-  // only fetch when she's moving upward AND the sentinel has actually
-  // come close to the top of the screen — not merely within a wide
-  // preload margin of wherever she happened to start.
-  let lastScrollY = window.scrollY;
-  let scrollCheckQueued = false;
-
-  function checkLoadPrevious() {
-    scrollCheckQueued = false;
-    if (loadingPrevWeeks) return;
-    const currentY = window.scrollY;
-    const scrollingUp = currentY < lastScrollY;
-    lastScrollY = currentY;
-    if (!scrollingUp) return;
-    const distanceFromTop = calendarSentinelTop.getBoundingClientRect().top;
-    // Only within a window approaching the top of the screen — not just
-    // "less than 400", which a deeply-scrolled page (viewing October, say)
-    // satisfies trivially too, since the sentinel sits so far above the
-    // viewport there that its distance is a large NEGATIVE number.
-    if (distanceFromTop > -50 && distanceFromTop < 400) loadPreviousCalendarWeeks();
-  }
-
-  window.addEventListener("scroll", () => {
-    if (scrollCheckQueued) return;
-    scrollCheckQueued = true;
-    requestAnimationFrame(checkLoadPrevious);
-  }, { passive: true });
-}
+calendarLoadEarlierBtn && calendarLoadEarlierBtn.addEventListener("click", loadPreviousCalendarWeeks);
 
 /* Sept: calendar view filters (Month/Week/List) — "Posting Schedule" plus a
    per-person Custom Events / Deadlines checkbox. Purely client-side: every
