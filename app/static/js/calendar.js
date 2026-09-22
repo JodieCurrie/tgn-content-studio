@@ -244,10 +244,27 @@ async function loadPreviousCalendarWeeks() {
 }
 
 if (calendarSentinelTop && "IntersectionObserver" in window) {
+  // Sept, per Jodie: the first thing she sees must always be the current
+  // week, full stop — no earlier weeks pulled in until she's actually
+  // scrolled for them. The 600px rootMargin below (same as the forward
+  // observer, so scrolling up feels just as seamless once she's doing it)
+  // means the sentinel counts as "intersecting" the moment it's merely
+  // close to the screen — which, on a short phone screen with the page
+  // header/toolbar/legend/filters above the grid, it already can be on
+  // first load, before she's touched the screen at all. That was firing a
+  // backward fetch immediately on open, pulling in August and pushing the
+  // nav/current week below the fold before she'd done anything.
+  //
+  // Don't even start watching the sentinel until after her first scroll —
+  // an observer's first observe() call always fires once for whatever the
+  // current intersection state is, so watching from page load is exactly
+  // what let this fire with zero interaction. Starting it fresh after a
+  // real scroll means that first check reflects a page she's actually
+  // scrolled, not the one that just rendered.
   const observerTop = new IntersectionObserver((entries) => {
     entries.forEach(entry => { if (entry.isIntersecting) loadPreviousCalendarWeeks(); });
   }, { rootMargin: "600px 0px 600px 0px" });
-  observerTop.observe(calendarSentinelTop);
+  window.addEventListener("scroll", () => observerTop.observe(calendarSentinelTop), { once: true, passive: true });
 }
 
 /* Sept: calendar view filters (Month/Week/List) — "Posting Schedule" plus a
