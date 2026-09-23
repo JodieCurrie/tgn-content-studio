@@ -80,6 +80,9 @@
   <div class="list-row js-open-idea" style="cursor:pointer;" data-idea-id="{{ s.id }}">
     <div style="flex:1;"><strong>{{ s.title }}</strong> → {{ s.campaign_title }}
       <div class="page-subtitle" style="margin:0;">{{ s.publish_date|friendly_date_long }}</div>
+      {% if s.canva_status == 'pending' %}<div class="page-subtitle" style="margin:0;">🎨 Design generating — check back shortly</div>
+      {% elif s.canva_status == 'ready' %}<div class="page-subtitle" style="margin:0;">🎨 <a href="{{ s.canva_design_link }}" target="_blank" rel="noopener" onclick="event.stopPropagation();">Open Canva design</a></div>
+      {% elif s.canva_status == 'failed' %}<div class="page-subtitle" style="margin:0;">🎨 Design generation had a problem — open the idea to check</div>{% endif %}
     </div>
     <button type="button" class="btn btn-sm btn-ghost js-delete-idea" data-idea-id="{{ s.id }}" data-idea-scheduled="1" title="Delete this idea">✕</button>
   </div>
