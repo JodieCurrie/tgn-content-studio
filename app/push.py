@@ -46,7 +46,11 @@ from . import db
 from . import best_time as best_time_module
 
 LOCAL_TIMEZONE_ENV = "LOCAL_TIMEZONE"
-DEFAULT_TIMEZONE = "America/New_York"
+# Falls back to Jodie's own timezone (South Africa, no DST) rather than a US
+# zone — an unset LOCAL_TIMEZONE env var on Render used to default here to
+# America/New_York, which put every reminder 6 hours off from her actual
+# clock (a "9am" reminder arriving at 2:50pm SAST instead of 8:50am).
+DEFAULT_TIMEZONE = "Africa/Johannesburg"
 REMINDER_LEAD_MINUTES = 10
 
 
