@@ -13,6 +13,7 @@ from .. import task_engine
 from .. import analytics
 from .. import pipeline
 from .. import push as push_module
+from .. import canva_ideas as canva_ideas_module
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -492,6 +493,13 @@ def upload_asset(campaign_id):
 
 
 # ---------------------------------------------------------------------- ideas bank
+def _content_type_key(content_type_id):
+    if not content_type_id:
+        return None
+    row = db.query_one("SELECT key FROM content_types WHERE id = ?", (content_type_id,))
+    return row["key"] if row else None
+
+
 @bp.route("/ideas", methods=["POST"])
 @login_required
 def create_idea():
@@ -499,17 +507,45 @@ def create_idea():
     title = (data.get("title") or "").strip()
     if not title:
         return jsonify({"error": "Please enter an idea."}), 400
-    idea_id = db.execute(
-        "INSERT INTO content_ideas (title, notes, links, content_type_id, created_by) VALUES (?,?,?,?,?)",
-        (title, data.get("notes", ""), data.get("links", ""), data.get("content_type_id"), g.user["id"]),
+    body_content = data.get("body_content", "")
+    content_type_id = data.get("content_type_id")
+    canva_status = canva_ideas_module.next_canva_status(
+        "none", _content_type_key(content_type_id), body_content, has_link=False
     )
-    if data.get("content_type_id"):
+    idea_id = db.execute(
+        """INSERT INTO content_ideas (title, notes, links, content_type_id, created_by, body_content, canva_status)
+           VALUES (?,?,?,?,?,?,?)""",
+        (title, data.get("notes", ""), data.get("links", ""), content_type_id, g.user["id"], body_content, canva_status),
+    )
+    if content_type_id:
         idea = db.row_to_dict(db.query_one("SELECT * FROM content_ideas WHERE id = ?", (idea_id,)))
         content_module._backfill_idea_into_placeholder_slot(idea)
-    return jsonify({"id": idea_id})
+    return jsonify({"id": idea_id, "canva_status": canva_status})
 
 
-IDEA_EDITABLE_FIELDS = {"title", "notes", "links", "content_type_id"}
+@bp.route("/ideas/<int:idea_id>/reference-images", methods=["POST"])
+@login_required
+def upload_idea_reference_image(idea_id):
+    idea = db.query_one("SELECT id FROM content_ideas WHERE id = ?", (idea_id,))
+    if not idea:
+        return jsonify({"error": "Not found"}), 404
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "No file"}), 400
+    image = canva_ideas_module.save_reference_image(
+        idea_id, file, g.user["id"], current_app.config["UPLOAD_FOLDER"]
+    )
+    return jsonify(image)
+
+
+@bp.route("/ideas/reference-images/<int:image_id>", methods=["DELETE"])
+@login_required
+def delete_idea_reference_image(image_id):
+    canva_ideas_module.delete_reference_image(image_id)
+    return jsonify({"ok": True})
+
+
+IDEA_EDITABLE_FIELDS = {"title", "notes", "links", "content_type_id", "body_content", "canva_design_link", "canva_status"}
 
 
 @bp.route("/ideas/<int:idea_id>", methods=["PATCH"])
@@ -545,6 +581,24 @@ def update_idea(idea_id):
             # just vacated.
             content_module.unschedule_idea(idea)
             retyping = True
+
+    # Auto-recompute canva_status when the type or body changed but the
+    # caller didn't explicitly set canva_status itself — that explicit case
+    # is how the recurring Canva-generation check marks an idea 'ready'
+    # (alongside canva_design_link), and next_canva_status() never
+    # downgrades 'ready'/'failed' back to 'pending' on its own anyway, so
+    # this only ever matters for newly-eligible or newly-ineligible ideas.
+    if "canva_status" not in fields and ("content_type_id" in fields or "body_content" in fields):
+        effective_type_id = fields.get("content_type_id", idea.get("content_type_id"))
+        effective_body = fields.get("body_content", idea.get("body_content", ""))
+        new_status = canva_ideas_module.next_canva_status(
+            idea.get("canva_status", "none"),
+            _content_type_key(effective_type_id),
+            effective_body,
+            has_link=bool(idea.get("canva_design_link")),
+        )
+        if new_status != idea.get("canva_status"):
+            fields["canva_status"] = new_status
 
     if not fields:
         return jsonify({"ok": True})

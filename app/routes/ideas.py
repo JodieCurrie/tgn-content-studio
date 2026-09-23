@@ -2,6 +2,7 @@ from flask import Blueprint, render_template
 
 from .. import db
 from ..auth import login_required
+from .. import canva_ideas as canva_ideas_module
 
 bp = Blueprint("ideas", __name__, url_prefix="/ideas")
 
@@ -26,6 +27,16 @@ def index():
                ORDER BY i.created_at DESC LIMIT 15"""
         )
     )
+    # Reference images (style inspiration for Canva design generation, Sept)
+    # — one query for every idea on the page rather than one per row.
+    ref_images_by_idea = canva_ideas_module.reference_images_for_ideas(
+        [i["id"] for i in ideas] + [s["id"] for s in scheduled]
+    )
+    for i in ideas:
+        i["reference_images"] = ref_images_by_idea.get(i["id"], [])
+    for s in scheduled:
+        s["reference_images"] = ref_images_by_idea.get(s["id"], [])
+
     content_types = db.rows_to_list(db.query("SELECT * FROM content_types WHERE archived = 0 ORDER BY sort_order"))
     # Monthly/Filler each get their own "what type of post" dropdown once an
     # idea is tagged with that category (Ideas overhaul, Sept); Targeted
@@ -36,4 +47,5 @@ def index():
     return render_template(
         "ideas.html", ideas=ideas, scheduled=scheduled, content_types=content_types,
         monthly_types=monthly_types, filler_types=filler_types, targeted_types=targeted_types,
+        canva_design_type_keys=sorted(canva_ideas_module.CANVA_DESIGN_TYPE_KEYS),
     )
