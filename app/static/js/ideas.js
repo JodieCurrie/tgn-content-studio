@@ -12,6 +12,7 @@ function populateQuickAddTypeOptions() {
   targetedSelect.innerHTML = typeOptionsHtml(window.TGN_TARGETED_TYPES || [], null);
   monthlySelect.innerHTML = `<option value="">Which type of Monthly post?</option>` + typeOptionsHtml(window.TGN_MONTHLY_TYPES || [], null);
   fillerSelect.innerHTML = `<option value="">Which type of Filler post?</option>` + typeOptionsHtml(window.TGN_FILLER_TYPES || [], null);
+  [targetedSelect, monthlySelect, fillerSelect].forEach(el => el.addEventListener("change", updateQuickAddCanvaSectionVisibility));
 }
 
 function wireQuickAddCategoryToggle() {
@@ -26,6 +27,7 @@ function wireQuickAddCategoryToggle() {
     Object.entries(groups).forEach(([key, el]) => {
       el.style.display = categorySelect.value === key ? "" : "none";
     });
+    updateQuickAddCanvaSectionVisibility();
   });
 }
 
@@ -37,9 +39,57 @@ function quickAddSelectedTypeId() {
   return val ? parseInt(val, 10) : null;
 }
 
+// ---------------------------------------------------------------------------
+// Canva design generation (Sept, per Jodie) — a type/body/reference-images
+// section that only shows up for the 5 post types a design can actually be
+// generated from (window.TGN_CANVA_DESIGN_TYPE_KEYS, set by ideas.html from
+// app/canva_ideas.py's CANVA_DESIGN_TYPE_KEYS). Reference images are style
+// inspiration only — never placed into the generated design itself.
+// ---------------------------------------------------------------------------
+function isCanvaEligibleTypeId(typeId) {
+  if (!typeId) return false;
+  const t = (window.TGN_CONTENT_TYPES || []).find(x => String(x.id) === String(typeId));
+  return !!t && (window.TGN_CANVA_DESIGN_TYPE_KEYS || []).includes(t.key);
+}
+
+function updateQuickAddCanvaSectionVisibility() {
+  const section = document.getElementById("idea-canva-section");
+  if (!section) return;
+  section.style.display = isCanvaEligibleTypeId(quickAddSelectedTypeId()) ? "" : "none";
+}
+
+let stagedReferenceFiles = [];
+
+function wireQuickAddReferenceImageInput() {
+  const input = document.getElementById("idea-reference-images");
+  if (!input) return;
+  input.addEventListener("change", () => {
+    stagedReferenceFiles = Array.from(input.files || []);
+    const box = document.getElementById("idea-reference-preview");
+    if (!box) return;
+    box.innerHTML = "";
+    stagedReferenceFiles.forEach(file => {
+      const img = document.createElement("img");
+      img.src = URL.createObjectURL(file);
+      img.style.cssText = "width:64px; height:64px; object-fit:cover; border-radius:6px;";
+      box.appendChild(img);
+    });
+  });
+}
+
+async function uploadReferenceImages(ideaId, files) {
+  for (const file of files) {
+    const fd = new FormData();
+    fd.append("file", file);
+    await fetch(`/api/ideas/${ideaId}/reference-images`, { method: "POST", body: fd });
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   populateQuickAddTypeOptions();
   wireQuickAddCategoryToggle();
+  wireQuickAddReferenceImageInput();
+  updateQuickAddCanvaSectionVisibility();
 });
 
 document.addEventListener("submit", async (e) => {
@@ -50,15 +100,21 @@ document.addEventListener("submit", async (e) => {
   if (!title) return;
   const errBox = document.getElementById("idea-form-error");
   try {
-    await tgnFetch("/api/ideas", {
+    const typeId = quickAddSelectedTypeId();
+    const bodyContentEl = document.getElementById("idea-body-content");
+    const result = await tgnFetch("/api/ideas", {
       method: "POST",
       body: JSON.stringify({
         title,
-        content_type_id: quickAddSelectedTypeId(),
+        content_type_id: typeId,
         notes: document.getElementById("idea-notes").value,
         links: document.getElementById("idea-links").value,
+        body_content: bodyContentEl ? bodyContentEl.value : "",
       }),
     });
+    if (isCanvaEligibleTypeId(typeId) && stagedReferenceFiles.length) {
+      await uploadReferenceImages(result.id, stagedReferenceFiles);
+    }
     window.location.reload();
   } catch (err) {
     if (errBox) {
@@ -88,6 +144,20 @@ document.addEventListener("click", (e) => {
     openScheduleIdeaModal(e.target.dataset.ideaId, e.target.dataset.ideaTitle, e.target.dataset.ideaTypeId);
     return;
   }
+  if (e.target.classList.contains("js-delete-reference-image")) {
+    e.stopPropagation();
+    tgnFetch(`/api/ideas/reference-images/${e.target.dataset.imageId}`, { method: "DELETE" })
+      .then(() => window.location.reload())
+      .catch(err => alert(err.message));
+    return;
+  }
+  if (e.target.classList.contains("js-retry-canva-design")) {
+    e.stopPropagation();
+    tgnFetch(`/api/ideas/${e.target.dataset.ideaId}`, { method: "PATCH", body: JSON.stringify({ canva_status: "pending" }) })
+      .then(() => window.location.reload())
+      .catch(err => alert(err.message));
+    return;
+  }
   const ideaRow = e.target.closest(".js-open-idea");
   if (ideaRow) {
     openEditIdeaModal(ideaRow.dataset.ideaId);
@@ -107,6 +177,35 @@ function categoryOfType(typeId) {
   const all = (window.TGN_CONTENT_TYPES || []);
   const t = all.find(x => String(x.id) === String(typeId));
   return t ? t.category_key : "";
+}
+
+function referenceImagesGalleryHtml(images) {
+  images = images || [];
+  if (!images.length) {
+    return `<div class="page-subtitle" style="margin-bottom:8px;">No reference images yet.</div>`;
+  }
+  return `<div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;">` +
+    images.map(img => `
+      <div style="position:relative;">
+        <img src="${img.url}" style="width:64px; height:64px; object-fit:cover; border-radius:6px;">
+        <button type="button" class="js-delete-reference-image" data-image-id="${img.id}"
+          style="position:absolute; top:-6px; right:-6px; width:18px; height:18px; border-radius:50%; border:none; background:#333; color:#fff; font-size:11px; line-height:1; cursor:pointer;"
+          title="Remove this reference image">✕</button>
+      </div>
+    `).join("") + `</div>`;
+}
+
+function canvaStatusHtml(idea) {
+  if (idea.canva_status === "pending") {
+    return `<div class="page-subtitle" style="margin-bottom:10px;">🎨 Design generating — check back shortly.</div>`;
+  }
+  if (idea.canva_status === "ready" && idea.canva_design_link) {
+    return `<div class="page-subtitle" style="margin-bottom:10px;">🎨 <a href="${idea.canva_design_link}" target="_blank" rel="noopener">Open Canva design</a></div>`;
+  }
+  if (idea.canva_status === "failed") {
+    return `<div class="page-subtitle" style="margin-bottom:10px;">🎨 Design generation had a problem. <button type="button" class="btn btn-sm btn-outline js-retry-canva-design" data-idea-id="${idea.id}">Retry</button></div>`;
+  }
+  return "";
 }
 
 function editIdeaFormHtml(idea) {
@@ -149,6 +248,19 @@ function editIdeaFormHtml(idea) {
         </select>
       `;
 
+  const canvaEligible = isCanvaEligibleTypeId(idea.content_type_id);
+  const canvaSectionHtml = `
+        <div id="ei-canva-section" style="${canvaEligible ? "" : "display:none;"}">
+          <label class="field-label">Body content <span class="page-subtitle" style="display:inline;">(what the post should say — needed to generate a design)</span></label>
+          <textarea class="field-input" id="ei-body-content" rows="4" style="margin-bottom:10px;">${idea.body_content || ""}</textarea>
+
+          <label class="field-label">Reference images <span class="page-subtitle" style="display:inline;">(style/mood inspiration only — never placed into the design itself)</span></label>
+          ${referenceImagesGalleryHtml(idea.reference_images)}
+          <input class="field-input" type="file" id="ei-reference-images" accept="image/*" multiple style="margin-bottom:10px;">
+          ${canvaStatusHtml(idea)}
+        </div>
+      `;
+
   return `
     <div class="modal-header"><strong>Edit idea</strong></div>
     <div class="modal-body">
@@ -157,6 +269,7 @@ function editIdeaFormHtml(idea) {
         <input class="field-input" id="ei-title" value="${(idea.title || "").replace(/"/g, "&quot;")}" style="margin-bottom:12px;" required>
 
         ${typeSectionHtml}
+        ${canvaSectionHtml}
 
         <label class="field-label">Notes</label>
         <textarea class="field-input" id="ei-notes" rows="3" style="margin-bottom:12px;">${idea.notes || ""}</textarea>
@@ -183,6 +296,31 @@ function wireCategoryToggle() {
     Object.entries(groups).forEach(([key, el]) => {
       el.style.display = categorySelect.value === key ? "" : "none";
     });
+    updateEiCanvaSectionVisibility();
+  });
+}
+
+function wireEiCanvaSectionToggle() {
+  ["ei-type-targeted", "ei-type-monthly", "ei-type-filler"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", updateEiCanvaSectionVisibility);
+  });
+}
+
+function updateEiCanvaSectionVisibility() {
+  const section = document.getElementById("ei-canva-section");
+  if (!section) return;
+  section.style.display = isCanvaEligibleTypeId(selectedTypeId()) ? "" : "none";
+}
+
+function wireEiReferenceImageUpload(ideaId) {
+  const input = document.getElementById("ei-reference-images");
+  if (!input) return;
+  input.addEventListener("change", async () => {
+    const files = Array.from(input.files || []);
+    if (!files.length) return;
+    await uploadReferenceImages(ideaId, files);
+    window.location.reload();
   });
 }
 
@@ -200,6 +338,8 @@ async function openEditIdeaModal(ideaId) {
   const scheduled = !!idea.scheduled_campaign_id;
   openModal(editIdeaFormHtml(idea));
   wireCategoryToggle();
+  wireEiCanvaSectionToggle();
+  wireEiReferenceImageUpload(ideaId);
   document.getElementById("edit-idea-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const errBox = document.getElementById("ei-error");
@@ -209,11 +349,13 @@ async function openEditIdeaModal(ideaId) {
         const proceed = confirm("Changing the type moves this off its current calendar slot and re-places it under the new type — into another open slot right away if one's free, or back to Unscheduled to wait for one. Continue?");
         if (!proceed) return;
       }
+      const bodyContentEl = document.getElementById("ei-body-content");
       const payload = {
         title: document.getElementById("ei-title").value.trim(),
         content_type_id: newTypeId,
         notes: document.getElementById("ei-notes").value,
         links: document.getElementById("ei-links").value,
+        body_content: bodyContentEl ? bodyContentEl.value : (idea.body_content || ""),
       };
       await tgnFetch(`/api/ideas/${ideaId}`, {
         method: "PATCH",
