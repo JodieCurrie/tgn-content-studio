@@ -33,6 +33,16 @@
     <label class="field-label">Links (one per line)</label>
     <textarea class="field-input" id="idea-links" rows="2" placeholder="https://drive.google.com/..." style="margin-bottom:12px;"></textarea>
 
+    <div id="idea-canva-section" style="display:none;">
+      <label class="field-label">Body content <span class="page-subtitle" style="display:inline;">(what the post should say — needed to generate a design)</span></label>
+      <textarea class="field-input" id="idea-body-content" rows="4" placeholder="The actual caption / on-image copy for this post..." style="margin-bottom:10px;"></textarea>
+
+      <label class="field-label">Reference images <span class="page-subtitle" style="display:inline;">(style/mood inspiration only — never placed into the design itself)</span></label>
+      <input class="field-input" type="file" id="idea-reference-images" accept="image/*" multiple style="margin-bottom:6px;">
+      <div id="idea-reference-preview" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;"></div>
+      <div class="page-subtitle" style="margin-bottom:12px;">Once you save this with a type and body content, a Canva design gets generated in that style within a few minutes — the link will show up on the idea here.</div>
+    </div>
+
     <div id="idea-form-error" class="flash error" style="display:none;"></div>
     <button class="btn btn-primary" type="submit">Add idea</button>
   </form>
@@ -48,6 +58,9 @@
         {% if i.type_label %}<span class="pill" style="margin-left:6px; background:{{ i.type_color }}33;">{{ i.type_label }}</span>{% else %}<span class="page-subtitle">· untagged</span>{% endif %}
         {% if i.notes %}<div class="page-subtitle" style="margin:0;">{{ i.notes }}</div>{% endif %}
         {% if i.links %}<div class="page-subtitle" style="margin:0;">🔗 {{ i.links.splitlines()|length }} link(s)</div>{% endif %}
+        {% if i.canva_status == 'pending' %}<div class="page-subtitle" style="margin:0;">🎨 Design generating — check back shortly</div>
+        {% elif i.canva_status == 'ready' %}<div class="page-subtitle" style="margin:0;">🎨 <a href="{{ i.canva_design_link }}" target="_blank" rel="noopener" onclick="event.stopPropagation();">Open Canva design</a></div>
+        {% elif i.canva_status == 'failed' %}<div class="page-subtitle" style="margin:0;">🎨 Design generation had a problem — open the idea to check</div>{% endif %}
       </div>
       {% if current_user.role_is_admin %}
       <button type="button" class="btn btn-sm btn-outline js-schedule-idea" data-idea-id="{{ i.id }}" data-idea-title="{{ i.title }}" data-idea-type-id="{{ i.content_type_id or '' }}">Schedule now</button>
@@ -83,6 +96,7 @@ window.TGN_CONTENT_TYPES = {{ content_types|tojson }};
 window.TGN_MONTHLY_TYPES = {{ monthly_types|tojson }};
 window.TGN_FILLER_TYPES = {{ filler_types|tojson }};
 window.TGN_TARGETED_TYPES = {{ targeted_types|tojson }};
+window.TGN_CANVA_DESIGN_TYPE_KEYS = {{ canva_design_type_keys|tojson }};
 window.TGN_IDEAS_BY_ID = {{ (ideas + scheduled)|tojson }}.reduce((acc, i) => { acc[i.id] = i; return acc; }, {});
 </script>
 <script src="{{ url_for('static', filename='js/ideas.js') }}"></script>
