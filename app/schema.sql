@@ -103,7 +103,31 @@ CREATE TABLE IF NOT EXISTS content_ideas (
     content_type_id INTEGER REFERENCES content_types(id),-- the specific type Jodie tagged it as (nullable = untyped)
     created_by      INTEGER REFERENCES users(id),
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    scheduled_campaign_id INTEGER REFERENCES campaigns(id) ON DELETE SET NULL -- set once converted
+    scheduled_campaign_id INTEGER REFERENCES campaigns(id) ON DELETE SET NULL, -- set once converted
+    -- Canva design generation (Sept, per Jodie) — see app/canva_ideas.py.
+    -- What the post copy should say, for the 5 post types a design can be
+    -- generated for (normal_post/carousel/moving_scripture/quick_reel/
+    -- scripture_expansion).
+    body_content       TEXT NOT NULL DEFAULT '',
+    -- none = not eligible yet (wrong type, or no body_content); pending =
+    -- eligible, waiting to be picked up; ready = canva_design_link is set;
+    -- failed = a generation attempt gave up (see canva_generated_at note).
+    canva_status       TEXT NOT NULL DEFAULT 'none',
+    canva_design_link  TEXT,
+    canva_generated_at TEXT
+);
+
+-- Reference images ("what I want it to look like") attached to an idea —
+-- style/mood inspiration only for the Canva design that gets generated
+-- from it, never inserted into the design itself (Sept, per Jodie — she
+-- was explicit about this). One idea can have several.
+CREATE TABLE IF NOT EXISTS idea_reference_images (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    idea_id     INTEGER NOT NULL REFERENCES content_ideas(id) ON DELETE CASCADE,
+    filename    TEXT NOT NULL,
+    stored_path TEXT NOT NULL,
+    uploaded_by INTEGER REFERENCES users(id),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- ---------------------------------------------------------------------------

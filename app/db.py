@@ -96,6 +96,15 @@ _COLUMN_MIGRATIONS = [
     # and clears reminder_sent_at above so the sweep fires again ~10
     # minutes before the new slot. See app/push.py / app/best_time.py.
     ("content_outputs", "reminder_target_time", "TEXT"),
+    # Canva design generation for ideas (Sept, per Jodie) — see
+    # app/canva_ideas.py. idea_reference_images is a brand-new table, so it
+    # needs no migration entry (schema.sql's CREATE TABLE IF NOT EXISTS
+    # handles it), but these are new columns on the already-live
+    # content_ideas table.
+    ("content_ideas", "body_content", "TEXT NOT NULL DEFAULT ''"),
+    ("content_ideas", "canva_status", "TEXT NOT NULL DEFAULT 'none'"),
+    ("content_ideas", "canva_design_link", "TEXT"),
+    ("content_ideas", "canva_generated_at", "TEXT"),
 ]
 
 
