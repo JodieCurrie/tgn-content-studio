@@ -109,9 +109,13 @@ async function commitDrag(campaignId, newDate, mode) {
 
 /* Click an empty date to add content there (Part 2 of the brief) — the
    click still opens the campaign panel when it lands on an existing card,
-   this only fires on the blank part of a day cell. */
+   this only fires on the blank part of a day cell. Oct 2026 fix: a
+   .deadline-pill click used to fall through to here too (it wasn't a
+   .content-card), popping open "add new content on this date" instead of
+   anything about the deadline itself — now excluded the same way, along
+   with .meeting-pill (a real link that shouldn't also open this). */
 document.addEventListener("click", (e) => {
-  if (e.target.closest(".content-card")) return;
+  if (e.target.closest(".content-card, .deadline-pill, .meeting-pill")) return;
   const day = e.target.closest(".calendar-day");
   if (!day || !day.dataset.date) return;
   if (typeof openCreateModal === "function") openCreateModal(day.dataset.date);
@@ -167,6 +171,14 @@ async function loadNextCalendarWeeks() {
         calendarSentinel.dataset.contYear = lastRail.dataset.year;
         calendarSentinel.dataset.contMonth = lastRail.dataset.month;
       }
+      // Oct 2026 fix: these freshly-inserted day cells carry their own
+      // data-filter-cat/data-filter-owner attributes straight from the
+      // server, with no "hidden" class applied yet — without re-running
+      // the filter pass here, a person's unchecked Deadlines/Custom events
+      // (e.g. Lizzy's) would reappear the moment the calendar loads a new
+      // batch of weeks, even though nothing about her saved filter choice
+      // changed. Same fix applies below in loadPreviousCalendarWeeks.
+      applyCalendarFilters();
     }
   } finally {
     loadingMoreWeeks = false;
@@ -247,6 +259,9 @@ async function loadPreviousCalendarWeeks() {
 
     // matches WEEKS_PER_FRAGMENT in app/routes/calendar.py
     calendarSentinelTop.dataset.earliestFrom = addDaysToIsoDate(before, -4 * 7);
+    // Oct 2026 fix: see the matching comment in loadNextCalendarWeeks — these
+    // newly-prepended cells need the filter pass re-run too.
+    applyCalendarFilters();
   } finally {
     loadingPrevWeeks = false;
     if (calendarLoadEarlierBtn) {
