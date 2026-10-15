@@ -27,6 +27,21 @@ def _add_days(iso_date, n):
     return (d + timedelta(days=n)).isoformat()
 
 
+# Oct 2026, per Jodie: "for the time being" she doesn't want anything landing
+# on a Sunday — a recurring rule's rhythm, a drag/shift, or a rule's anchor
+# date. Centralised here so every date-picking path (recurring generation,
+# drag-and-drop, rule-shifting) goes through the same rule instead of each
+# needing its own check. Bumps forward to Monday rather than back to
+# Saturday, since Saturday is itself a normal posting day and pushing a date
+# earlier risks colliding with whatever's already scheduled that day.
+def _skip_sunday(d):
+    return d + timedelta(days=1) if d.weekday() == 6 else d
+
+
+def skip_sunday_iso(iso_date):
+    return _skip_sunday(date.fromisoformat(iso_date)).isoformat()
+
+
 def _weekday_name(idx):
     return ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][idx]
 
@@ -74,14 +89,14 @@ def _next_occurrence(rule, after_date):
         if occ <= after_date:
             steps = ((after_date - occ).days // interval) + 1
             occ = occ + timedelta(days=interval * steps)
-        return occ
+        return _skip_sunday(occ)
 
     if rule["rule_type"] == "monthly_nth_weekday":
         y, m = after_date.year, after_date.month
         for _ in range(14):
             occ = nth_weekday_of_month(y, m, rule["weekday"], rule["nth"] or 1)
             if occ and occ > after_date:
-                return occ
+                return _skip_sunday(occ)
             m += 1
             if m > 12:
                 m = 1
@@ -93,7 +108,7 @@ def _next_occurrence(rule, after_date):
         for _ in range(14):
             occ = last_weekday_of_month(y, m, rule["weekday"])
             if occ > after_date:
-                return occ
+                return _skip_sunday(occ)
             m += 1
             if m > 12:
                 m = 1
@@ -105,7 +120,7 @@ def _next_occurrence(rule, after_date):
         for _ in range(14):
             occ = second_last_weekday_of_month(y, m, rule["weekday"])
             if occ > after_date:
-                return occ
+                return _skip_sunday(occ)
             m += 1
             if m > 12:
                 m = 1
@@ -123,7 +138,7 @@ def _next_occurrence(rule, after_date):
         occ = nth_weekday_of_month(y, m, rule["weekday"], rule["nth"] or 1)
         for _ in range(60):  # generous cap: 60 cycles is decades out
             if occ and occ > after_date:
-                return occ
+                return _skip_sunday(occ)
             y, m = add_months_ym(y, m, interval)
             occ = nth_weekday_of_month(y, m, rule["weekday"], rule["nth"] or 1)
         return None
@@ -160,8 +175,11 @@ def materialize_rule(rule_id, today=None):
 
     occurrences = generate_occurrences(rule, start, horizon_end)
     # always include the anchor date itself if it falls in range and isn't covered
-    if anchor not in occurrences and start <= anchor <= horizon_end:
-        occurrences.insert(0, anchor)
+    # (skip_sunday guards a Sunday-landing anchor the same as any generated
+    # occurrence — see _skip_sunday's note above)
+    anchor_occ = _skip_sunday(anchor)
+    if anchor_occ not in occurrences and start <= anchor_occ <= horizon_end:
+        occurrences.insert(0, anchor_occ)
         occurrences.sort()
 
     existing_dates = {
@@ -325,6 +343,13 @@ def apply_drag(campaign_id, new_date_iso, mode, actor_id=None):
     if not c:
         raise ValueError("Campaign not found")
     category_key = _category_key_for(c["primary_content_type_id"])
+
+    # Oct 2026, per Jodie: nothing gets dropped onto a Sunday, regardless of
+    # drag mode — bump the landing date forward to Monday before any of the
+    # modes below act on it. Covers a plain single-card drag as well as
+    # "shift the recurring schedule", which is the case that prompted this
+    # (dragging onto a Sunday was re-anchoring the whole rule to Sundays).
+    new_date_iso = skip_sunday_iso(new_date_iso)
 
     old_date = c["publish_date"]
     delta_days = (date.fromisoformat(new_date_iso) - date.fromisoformat(old_date)).days

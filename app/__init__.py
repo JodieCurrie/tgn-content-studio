@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from flask import Flask, send_from_directory, current_app
+from flask import Flask, send_from_directory, current_app, request
 
 from . import db as db_module
 
@@ -54,6 +54,24 @@ def create_app(test_config=None):
 
     from . import template_helpers
     template_helpers.register(app)
+
+    # Oct 2026, per Jodie: changes (a drag, an edit, a new idea) sometimes
+    # weren't showing up right away — the page would show the old state for
+    # a while, then catch up on its own. Nothing in this app caches
+    # anything server-side, which points at the browser (or something
+    # sitting in front of it, like a CDN on a custom domain) caching a GET
+    # response by default since nothing here ever said not to. Static
+    # assets are left alone (they're served from send_from_directory below
+    # and by Flask's own static handler, and genuinely benefit from some
+    # cache life); every page, every /api/ response and every
+    # /calendar/*-fragment response now explicitly says not to cache, so
+    # what's on screen always matches what's actually in the database.
+    @app.after_request
+    def _no_cache_dynamic_responses(response):
+        if not request.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+        return response
 
     @app.route("/health")
     def health():
