@@ -27,15 +27,21 @@ def _add_days(iso_date, n):
     return (d + timedelta(days=n)).isoformat()
 
 
-# Oct 2026, per Jodie: "for the time being" she doesn't want anything landing
-# on a Sunday — a recurring rule's rhythm, a drag/shift, or a rule's anchor
-# date. Centralised here so every date-picking path (recurring generation,
+# Oct 2026, per Jodie: she doesn't want anything landing on a Saturday or a
+# Sunday — a recurring rule's rhythm, a drag/shift, or a rule's anchor date.
+# Centralised here so every date-picking path (recurring generation,
 # drag-and-drop, rule-shifting) goes through the same rule instead of each
-# needing its own check. Bumps forward to Monday rather than back to
-# Saturday, since Saturday is itself a normal posting day and pushing a date
-# earlier risks colliding with whatever's already scheduled that day.
+# needing its own check. Both weekend days bump forward to the following
+# Monday rather than back, since pushing a date earlier risks colliding with
+# whatever's already scheduled on the day before. (Originally just
+# _skip_sunday — widened to cover Saturday too once Jodie confirmed both
+# weekend days are off-limits, not just Sunday.)
 def _skip_sunday(d):
-    return d + timedelta(days=1) if d.weekday() == 6 else d
+    if d.weekday() == 5:  # Saturday
+        return d + timedelta(days=2)
+    if d.weekday() == 6:  # Sunday
+        return d + timedelta(days=1)
+    return d
 
 
 def skip_sunday_iso(iso_date):
@@ -182,10 +188,24 @@ def materialize_rule(rule_id, today=None):
         occurrences.insert(0, anchor_occ)
         occurrences.sort()
 
+    # Oct 2026, per Jodie: moving/retitling a rule-linked campaign (drag mode
+    # "only"/"with_dependents") deliberately detaches it from the rule —
+    # that's what makes it a one-off exception instead of changing the whole
+    # rhythm. But that also cleared scheduling_rule_id, so a date check
+    # scoped to just this rule's own campaigns no longer "sees" it: the rule
+    # thought that occurrence had never been created and kept spawning a
+    # fresh duplicate "New Targeted Campaign" there every time the horizon
+    # rolled forward — exactly what produced the double-booked days Jodie
+    # found. A date already covered by ANY root campaign of this rule's own
+    # content type (manually detached or not) counts as handled, same as a
+    # still-linked one.
     existing_dates = {
         r["publish_date"]
         for r in db.query(
-            "SELECT publish_date FROM campaigns WHERE scheduling_rule_id = ?", (rule_id,)
+            """SELECT publish_date FROM campaigns
+               WHERE scheduling_rule_id = ?
+                  OR (primary_content_type_id = ? AND depends_on_campaign_id IS NULL)""",
+            (rule_id, rule["content_type_id"]),
         )
     }
 
