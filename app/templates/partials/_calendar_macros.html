@@ -40,10 +40,21 @@
   {# Pipeline hand-off deadlines (edit/audio/design_post — Sept "deadline
      calendars"): first time these get a visual spot on the app's own
      calendar, tagged per-owner like Custom Events so each person's
-     deadlines can be shown/hidden independently. #}
+     deadlines can be shown/hidden independently.
+     Oct 2026 fix: these used to be a static, non-clickable pill with the
+     campaign it belongs to buried in a hover title (useless on a phone,
+     and clicking one did nothing of its own — the click just fell through
+     to the day cell's "add new content here" handler instead, which is
+     what Jodie actually saw happen). js-open-campaign + data-campaign-id
+     wires it into the same campaign detail panel every other card on the
+     calendar already opens, and the campaign title is now on the pill
+     itself (truncated via CSS, not hidden) so the "what's this for" answer
+     doesn't require a click at all. #}
   {% for dl in deadlines_by_day.get(iso, []) %}
-  <div class="deadline-pill" data-filter-cat="deadline" data-filter-owner="{{ dl.owner_id }}" title="{{ dl.campaign_title }} — {{ dl.owner_name }}">
+  <div class="deadline-pill js-open-campaign" data-filter-cat="deadline" data-filter-owner="{{ dl.owner_id }}"
+       data-campaign-id="{{ dl.campaign_id }}" title="{{ dl.campaign_title }} — {{ dl.label }}{% if dl.owner_name %} ({{ dl.owner_name }}){% endif %}">
     ⏰ {{ dl.label }}{% if dl.owner_name %} · {{ dl.owner_name }}{% endif %}
+    <span class="deadline-pill-title">{{ dl.campaign_title }}</span>
   </div>
   {% endfor %}
 </div>
