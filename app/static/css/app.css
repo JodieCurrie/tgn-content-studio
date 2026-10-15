@@ -191,7 +191,17 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 .deadline-pill {
   display: block; border-radius: var(--radius-sm); padding: 4px 7px; font-size: 11px;
   font-weight: 600; line-height: 1.25; color: #6B4A1E; background: #F0C878;
-  margin-top: 4px;
+  margin-top: 4px; cursor: pointer;
+}
+.deadline-pill:hover { background: #ECBB5C; }
+/* Oct 2026: the campaign/post this deadline belongs to, right on the pill
+   (previously only in a hover title, which a tap can't reveal) — truncated
+   rather than wrapped so one overdue pill doesn't blow out a packed day
+   cell; the full title is still in the hover title and the detail panel
+   a click opens. */
+.deadline-pill-title {
+  display: block; font-weight: 500; opacity: 0.85; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
 }
 
 /* ---------------------------------------------------------------- calendar */
