@@ -794,7 +794,6 @@ body {
 }
 .sidebar-toggle::before { content: "☰"; font-size: 17px; line-height: 1; }
 .sidebar-toggle:hover { background: #F4DDF1; color: #5E475A; }
-.app-topbar:hover + .sidebar,
 .sidebar:hover,
 .sidebar:focus-within,
 body.sidebar-open .sidebar { transform: translateX(0); }
