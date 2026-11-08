@@ -189,13 +189,15 @@ gap: 6px; min-width: 130px;
 /* Pipeline hand-off deadline (edit/audio/design_post — Sept) — a warm,
 distinct pill so it reads as "something is due", never confused with the
 grey .meeting-pill (a scheduled meeting) or a colored .content-card
-(something actually being posted). */
+(something actually being posted). Nov 2026, per Jodie: toned down from a
+bright gold to a muted clay — still warm enough to read as "due" next to
+the grey .meeting-pill, but no longer the loudest thing on the day cell. */
 .deadline-pill {
 display: block; border-radius: var(--radius-sm); padding: 4px 7px; font-size: 11px;
-font-weight: 600; line-height: 1.25; color: #6B4A1E; background: #F0C878;
+font-weight: 600; line-height: 1.25; color: #6B5636; background: #D9C7A8;
 margin-top: 4px; cursor: pointer;
 }
-.deadline-pill:hover { background: #ECBB5C; }
+.deadline-pill:hover { background: #CDB890; }
 /* Oct 2026: the campaign/post this deadline belongs to, right on the pill
 (previously only in a hover title, which a tap can't reveal) — truncated
 rather than wrapped so one overdue pill doesn't blow out a packed day
