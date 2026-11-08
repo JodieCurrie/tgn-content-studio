@@ -214,6 +214,7 @@ display: grid; grid-template-columns: 34px repeat(7, 1fr);
 border: 1px solid var(--border); border-radius: var(--radius-lg);
 overflow: hidden; background: var(--border);
 gap: 1px;
+position: relative;
 }
 .calendar-weekday-header {
 background: var(--surface-alt); padding: 8px 10px; font-size: 11.5px;
@@ -316,10 +317,33 @@ color: var(--surface); line-height: 1;
 .stage-step.is-current .stage-step-label { color: var(--accent-dark); }
 
 /* ---------------------------------------------------------------- week view */
-.week-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin-bottom: 22px; }
+.week-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin-bottom: 22px; position: relative; }
 .week-day-col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px; min-height: 220px; }
 .week-day-col.today { box-shadow: inset 0 0 0 2px var(--accent-soft); }
 .week-day-head { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; }
+
+/* Custom Events (Nov 2026 redesign, per Jodie): a team off-time/unavailable
+   block, drawn as one continuous bar across however many day cells it
+   spans rather than a separate card repeated on every day — computed and
+   positioned client-side in calendar.js (renderCustomEventBars), since the
+   grid is responsive and each day cell's real on-screen rect is the only
+   reliable way to bridge the gap between cells. .has-custom-event just
+   reserves room at the top of a cell so the bar doesn't sit on top of the
+   day number or that day's own regular content. */
+.calendar-day.has-custom-event, .week-day-col.has-custom-event { padding-top: 32px; }
+.cal-event-bar {
+position: absolute;
+display: flex; align-items: center;
+height: 19px;
+padding: 0 9px;
+border-radius: 999px;
+font-size: 11px; font-weight: 700; color: #fff;
+white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+box-shadow: 0 1px 3px rgba(70, 48, 65, .18);
+cursor: pointer;
+z-index: 3;
+}
+.cal-event-bar:hover { filter: brightness(0.95); }
 
 /* ---------------------------------------------------------------- lists */
 .list-row {
