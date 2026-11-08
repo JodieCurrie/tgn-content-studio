@@ -179,6 +179,9 @@ async function loadNextCalendarWeeks() {
       // batch of weeks, even though nothing about her saved filter choice
       // changed. Same fix applies below in loadPreviousCalendarWeeks.
       applyCalendarFilters();
+      // Nov 2026: fetch Custom Events for exactly this newly-loaded
+      // 4-week batch and redraw — see the "custom event bars" block below.
+      fetchCustomEvents(from, addDaysToIsoDate(from, 4 * 7 - 1));
     }
   } finally {
     loadingMoreWeeks = false;
@@ -262,6 +265,9 @@ async function loadPreviousCalendarWeeks() {
     // Oct 2026 fix: see the matching comment in loadNextCalendarWeeks — these
     // newly-prepended cells need the filter pass re-run too.
     applyCalendarFilters();
+    // Nov 2026: same Custom Events fetch/redraw as loadNextCalendarWeeks,
+    // for this newly-prepended 4-week batch.
+    fetchCustomEvents(addDaysToIsoDate(before, -4 * 7), addDaysToIsoDate(before, -1));
   } finally {
     loadingPrevWeeks = false;
     if (calendarLoadEarlierBtn) {
@@ -375,3 +381,126 @@ function initCalendarFilterAutoClose() {
 initCalendarFilterPanel();
 initCalendarFilterAutoClose();
 applyCalendarFilters();
+
+/* ---------------------------------------------------- custom event bars
+   Custom Events (Nov 2026 redesign, per Jodie): off-time/unavailable team
+   blocks, each with a start date and an optional end date for a multi-day
+   block, drawn as one continuous bar across however many day cells it
+   spans — not a separate card repeated on every day. Drawn client-side,
+   overlaid on the grid, because the only reliable way to bridge the real
+   gaps/borders between day cells (see .calendar-day in app.css — these
+   are separate floating cards with their own border and radius, not a
+   seamless table) is from each cell's actual on-screen rect, which only
+   the browser knows once it's actually laid out — and that also makes
+   this naturally correct on resize and on every screen size without any
+   fixed-pixel assumptions.
+
+   Deliberately fetched from its own small JSON endpoint
+   (/calendar/custom-events) rather than threaded through the HTML every
+   view/fragment already renders: the month view, its two infinite-scroll
+   fragments, and the 2-week view all load different date ranges through
+   completely different server routes, and one shared endpoint covers all
+   of them without touching any of that existing rendering. */
+const calEventsCache = new Map(); // output id -> {id, campaign_id, title, start, end, color, owner_id, owner_name}
+
+function calEventGridEl() {
+  return document.getElementById("calendar-grid") || document.getElementById("week-grid");
+}
+
+async function fetchCustomEvents(fromIso, toIso) {
+  if (!fromIso || !toIso) return;
+  try {
+    const res = await fetch(`/calendar/custom-events?from=${fromIso}&to=${toIso}`);
+    if (!res.ok) return;
+    const events = await res.json();
+    events.forEach(ev => calEventsCache.set(ev.id, ev));
+    renderCustomEventBars();
+  } catch (e) { /* non-critical — the rest of the calendar still works */ }
+}
+
+function isoDatesBetween(startIso, endIso) {
+  const out = [];
+  let d = new Date(startIso + "T00:00:00Z");
+  const end = new Date(endIso + "T00:00:00Z");
+  while (d <= end) {
+    out.push(d.toISOString().slice(0, 10));
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return out;
+}
+
+function renderCustomEventBars() {
+  const grid = calEventGridEl();
+  if (!grid) return;
+  grid.querySelectorAll(".cal-event-bar").forEach(el => el.remove());
+  grid.querySelectorAll(".has-custom-event").forEach(el => el.classList.remove("has-custom-event"));
+
+  const gridRect = grid.getBoundingClientRect();
+  calEventsCache.forEach(ev => {
+    const cells = isoDatesBetween(ev.start, ev.end)
+      .map(iso => grid.querySelector(`[data-date="${iso}"]`))
+      .filter(Boolean);
+    if (!cells.length) return; // nothing in the currently-rendered range
+    cells.forEach(cell => cell.classList.add("has-custom-event"));
+
+    // Group into visual runs: a new run starts whenever the row changes
+    // (a week wrap in month view, or the 7-wide wrap in week view) —
+    // detected from each cell's actual position, not date math, since
+    // that's what's actually true on screen right now.
+    const runs = [];
+    let current = null;
+    let prevTop = null;
+    cells.forEach(cell => {
+      const top = cell.getBoundingClientRect().top;
+      if (current && prevTop !== null && Math.abs(top - prevTop) < 2) {
+        current.push(cell);
+      } else {
+        current = [cell];
+        runs.push(current);
+      }
+      prevTop = top;
+    });
+
+    runs.forEach(run => {
+      const first = run[0].getBoundingClientRect();
+      const last = run[run.length - 1].getBoundingClientRect();
+      const bar = document.createElement("div");
+      bar.className = "cal-event-bar js-open-campaign";
+      bar.dataset.campaignId = ev.campaign_id;
+      bar.dataset.filterCat = "custom";
+      bar.dataset.filterOwner = ev.owner_id || "";
+      bar.title = ev.owner_name ? `${ev.title} — ${ev.owner_name}` : ev.title;
+      bar.textContent = ev.title;
+      bar.style.left = (first.left - gridRect.left) + "px";
+      bar.style.top = (first.top - gridRect.top + 6) + "px";
+      bar.style.width = Math.max(last.right - first.left, 20) + "px";
+      bar.style.background = ev.color || "#C895D5";
+      grid.appendChild(bar);
+    });
+  });
+  // The bars just carry data-filter-cat="custom"/data-filter-owner like
+  // anything else on the calendar (see applyCalendarFilters above) — this
+  // just needs to run once more now that they actually exist in the DOM.
+  applyCalendarFilters();
+}
+
+let calEventResizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(calEventResizeTimer);
+  calEventResizeTimer = setTimeout(renderCustomEventBars, 150);
+});
+
+// Initial load for whichever view this is: month view already exposes its
+// rendered range on the existing sentinels (earliest_from / next_from —
+// see calendar_month.html), so no new plumbing is needed there; the week
+// view exposes its own start/end directly on #week-grid.
+(function initCustomEventsForCurrentView() {
+  if (calendarSentinelTop && calendarSentinel) {
+    const from = calendarSentinelTop.dataset.earliestFrom;
+    const to = addDaysToIsoDate(calendarSentinel.dataset.nextFrom, -1);
+    fetchCustomEvents(from, to);
+    return;
+  }
+  const weekGrid = document.getElementById("week-grid");
+  if (weekGrid) fetchCustomEvents(weekGrid.dataset.start, weekGrid.dataset.end);
+})();

@@ -131,7 +131,31 @@ document.addEventListener("click", (e) => {
     try { platformIds = JSON.parse(opt.dataset.platforms || "[]"); } catch (err) {}
     applyPlatformDefaults(platformIds);
   }
+
+  applyCustomEventFormMode(opt.dataset.key === "custom");
 });
+
+// Custom Events redesign (Nov 2026, per Jodie): these are team off-time
+// blocks, not content — they get a date range instead of a single publish
+// date, and Platforms is meaningless for them so it's hidden rather than
+// just left to be ignored. Re-applied every time the type selection
+// changes (including back OFF "custom" onto a normal content type, which
+// resets everything to how it already worked before this existed).
+function applyCustomEventFormMode(isCustom) {
+  const endDateWrap = document.getElementById("qc-end-date-wrap");
+  const platformsWrap = document.getElementById("qc-platforms-wrap");
+  const titleLabel = document.getElementById("qc-title-label");
+  const dateLabel = document.getElementById("qc-date-label");
+  const titleInput = document.getElementById("qc-title");
+  if (endDateWrap) endDateWrap.style.display = isCustom ? "block" : "none";
+  if (platformsWrap) platformsWrap.style.display = isCustom ? "none" : "block";
+  if (titleLabel) titleLabel.textContent = isCustom
+    ? "Who's off, or what's happening? (e.g. Gabe on vacation)"
+    : "What are we posting? (the actual topic — not just the type)";
+  if (dateLabel) dateLabel.textContent = isCustom ? "Start date" : "Publish date";
+  if (titleInput) titleInput.placeholder = isCustom ? "e.g. Gabe on vacation" : "e.g. Does God really forgive everything?";
+  if (isCustom) document.querySelectorAll('#qc-platforms input[type=checkbox]').forEach(cb => { cb.checked = false; });
+}
 
 document.addEventListener("change", (e) => {
   if (e.target.id !== "qc-subtype") return;
@@ -164,11 +188,17 @@ document.addEventListener("submit", async (e) => {
     return;
   }
   const platformIds = Array.from(form.querySelectorAll('input[name=platform_ids]:checked')).map(cb => parseInt(cb.value, 10));
+  const isCustom = typeKey === "custom";
   const payload = {
     creation_option_key: typeKey,
     content_type_id: contentTypeId || null,
     title: document.getElementById("qc-title").value,
     publish_date: document.getElementById("qc-date").value,
+    // Custom Events redesign (Nov 2026): only ever sent for a Custom Event
+    // — an end date on anything else would be meaningless, so it's left
+    // out of the payload entirely rather than relying on the field being
+    // hidden/empty for every other type.
+    end_date: isCustom ? (document.getElementById("qc-end-date").value || null) : null,
     assigned_user_id: document.getElementById("qc-assignee").value || null,
     concept: document.getElementById("qc-concept").value,
     platform_ids: platformIds.length ? platformIds : null,
