@@ -97,7 +97,11 @@
       <summary>{{ 'Me' if u.id == current_user_id else u.name }}<span class="cal-filter-badge" data-owner="{{ u.id }}" hidden></span></summary>
       <div class="cal-filter-person-items">
         <label class="calendar-filter-item">
-          <input type="checkbox" class="js-cal-filter" data-cat="custom" data-owner="{{ u.id }}" checked> Custom events
+          {# Nov 2026, per Jodie: Custom Events are opt-in per person now —
+             unchecked by default, so a name's off-time block only shows up
+             once someone deliberately ticks it (see calendar.js
+             calFilterDefaultVisible). #}
+          <input type="checkbox" class="js-cal-filter" data-cat="custom" data-owner="{{ u.id }}"> Custom events
         </label>
         <label class="calendar-filter-item">
           <input type="checkbox" class="js-cal-filter" data-cat="deadline" data-owner="{{ u.id }}" checked> Deadlines

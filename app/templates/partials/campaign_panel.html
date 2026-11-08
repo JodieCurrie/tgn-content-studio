@@ -10,8 +10,42 @@
 </div>
 <div class="panel-body" data-campaign-id="{{ c.id }}">
 
+  {% set ce_output = c.outputs[0] if (c.primary_type_key == 'custom' and c.outputs) else None %}
   <div class="panel-section">
     <h4>Status &amp; scheduling</h4>
+    {% if c.primary_type_key == 'custom' %}
+    {# Custom Events redesign (Nov 2026, per Jodie): no publish pipeline, so
+       this is just who it's for and the date range it covers — editable
+       here, or by dragging either end of the bar on the calendar itself
+       (see calendar.js calEventResize). #}
+    <div class="form-grid">
+      <div>
+        <label class="field-label">Status</label>
+        <div><span class="pill status-{{ c.status }}">{{ c.status|status_label }}</span></div>
+      </div>
+      <div>
+        <label class="field-label">Assigned to</label>
+        <select class="field-select js-custom-event-assignee" data-output-id="{{ ce_output.id if ce_output }}">
+          <option value="">Unassigned</option>
+          {% for u in users %}
+          <option value="{{ u.id }}" {{ 'selected' if ce_output and ce_output.assigned_user_id == u.id }}>{{ u.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="form-grid" style="margin-top:14px;">
+      <div>
+        <label class="field-label">Start date</label>
+        <input class="field-input js-custom-event-date" type="date" data-field="publish_date"
+               data-output-id="{{ ce_output.id if ce_output }}" value="{{ ce_output.publish_date if ce_output else c.publish_date }}">
+      </div>
+      <div>
+        <label class="field-label">Through (optional)</label>
+        <input class="field-input js-custom-event-date" type="date" data-field="end_date"
+               data-output-id="{{ ce_output.id if ce_output }}" value="{{ ce_output.end_date if ce_output else '' }}">
+      </div>
+    </div>
+    {% else %}
     <div class="form-grid">
       <div>
         <label class="field-label">Status</label>
@@ -27,7 +61,10 @@
     {% elif c.schedule_origin == 'dependent' %}
     <div class="page-subtitle" style="margin-top:6px;">↳ Auto-created as a follow-up. Moving its parent will move this too.</div>
     {% endif %}
+    {% endif %}
   </div>
+
+  {% if c.primary_type_key != 'custom' %}
 
   {% if c.shoot_stages %}
   {# Shared shoot-level tracker (Part 14-18+): Script Development, Concept
@@ -393,6 +430,16 @@
       <span class="pill">{{ d.status|status_label }}</span>
     </div>
     {% endfor %}
+  </div>
+  {% endif %}
+
+  {% else %}
+  {# Custom Events (Nov 2026, per Jodie): "removing all info regarding
+     posting" — no concept/script/platforms/tasks here, just a place for a
+     short note (e.g. who's covering, why, how to reach them). #}
+  <div class="panel-section">
+    <h4>Notes</h4>
+    <textarea class="field-textarea js-autosave" data-campaign-id="{{ c.id }}" data-field="notes" placeholder="Any extra detail — who's covering, how to reach them...">{{ c.notes }}</textarea>
   </div>
   {% endif %}
 
