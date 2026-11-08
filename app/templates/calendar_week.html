@@ -18,7 +18,7 @@
 
 {{ cal.render_filter_panel(filter_users, current_user_id) }}
 
-<div class="week-grid">
+<div class="week-grid" id="week-grid" data-start="{{ start.isoformat() }}" data-end="{{ end.isoformat() }}">
   {% for day in days %}
   {% set iso = day.isoformat() %}
   <div class="week-day-col {{ 'today' if day == today }}" data-date="{{ iso }}">
