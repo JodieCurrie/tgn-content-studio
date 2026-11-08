@@ -155,6 +155,15 @@ function applyCustomEventFormMode(isCustom) {
   if (dateLabel) dateLabel.textContent = isCustom ? "Start date" : "Publish date";
   if (titleInput) titleInput.placeholder = isCustom ? "e.g. Gabe on vacation" : "e.g. Does God really forgive everything?";
   if (isCustom) document.querySelectorAll('#qc-platforms input[type=checkbox]').forEach(cb => { cb.checked = false; });
+  // Nov 2026, per Jodie ("make it auto assign to the person who is
+  // creating it"): a Custom Event is almost always someone blocking off
+  // their own time, so default the assignee to whoever's creating it
+  // rather than Unassigned — just a default, still changeable in the
+  // dropdown before submitting (e.g. an admin logging someone else's leave).
+  const assigneeSelect = document.getElementById("qc-assignee");
+  if (isCustom && assigneeSelect && window.TGN_CURRENT_USER_ID) {
+    assigneeSelect.value = String(window.TGN_CURRENT_USER_ID);
+  }
 }
 
 document.addEventListener("change", (e) => {
