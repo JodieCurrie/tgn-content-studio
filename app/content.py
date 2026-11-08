@@ -820,7 +820,7 @@ def get_campaign_detail(campaign_id):
     campaign = db.row_to_dict(
         db.query_one(
             """SELECT c.*, ct.label AS primary_type_label, ct.color AS primary_type_color,
-                      u.name AS owner_name
+                      ct.key AS primary_type_key, u.name AS owner_name
                FROM campaigns c
                LEFT JOIN content_types ct ON ct.id = c.primary_content_type_id
                LEFT JOIN users u ON u.id = c.owner_id
