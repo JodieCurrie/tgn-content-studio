@@ -90,8 +90,18 @@
 
       {% if stage.is_meeting_stage and stage.unlocked %}
         {% if stage.needs_scheduling %}
-        <div style="margin-top:2px;">
+        <div style="margin-top:2px; display:flex; gap:6px; flex-wrap:wrap;">
           <button type="button" class="btn btn-sm btn-outline js-schedule-meeting" data-campaign-id="{{ c.id }}" data-stage-key="{{ stage.stage_key }}">📅 Schedule this meeting</button>
+          {% if stage.stage_key == 'concept' %}
+          {# Nov 2026, per Jodie: a way to move past the content meeting
+             without scheduling one in the app at all — covers "we already
+             had it" (informally, or before this went live) and "we're not
+             doing a formal meeting for this one". Reuses the same
+             confirm-happened action as the post-meeting "Did this happen?"
+             button (js-confirm-yes in app.js) — it has no real dependency
+             on a meeting ever having been scheduled. #}
+          <button type="button" class="btn btn-sm btn-ghost js-confirm-yes" data-stage-id="{{ stage.id }}" data-stage-key="{{ stage.stage_key }}" title="Skip scheduling — mark the content meeting as already happened (or not needed) and move to the next step">✅ Already had this meeting</button>
+          {% endif %}
         </div>
         {% elif stage.needs_confirmation %}
         <div style="margin-top:2px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
