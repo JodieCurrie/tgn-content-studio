@@ -767,14 +767,15 @@ def _spawn_podcast_highlight_followups(parent_campaign_id, parent_publish_iso, a
         )
 
 
-def add_output(campaign_id, content_type_id, publish_date_iso, title=None, platform_ids=None, assigned_user_id=None):
+def add_output(campaign_id, content_type_id, publish_date_iso, title=None, platform_ids=None,
+                assigned_user_id=None, end_date_iso=None):
     ct = get_content_type(content_type_id)
     if platform_ids is None:
         platform_ids = db.from_json(ct["default_platform_ids"], [])
     output_id = db.execute(
-        """INSERT INTO content_outputs (campaign_id, content_type_id, title, publish_date, status, assigned_user_id)
-           VALUES (?, ?, ?, ?, 'idea', ?)""",
-        (campaign_id, content_type_id, title, publish_date_iso, assigned_user_id),
+        """INSERT INTO content_outputs (campaign_id, content_type_id, title, publish_date, end_date, status, assigned_user_id)
+           VALUES (?, ?, ?, ?, ?, 'idea', ?)""",
+        (campaign_id, content_type_id, title, publish_date_iso, end_date_iso, assigned_user_id),
     )
     for pid in platform_ids:
         db.execute(
@@ -786,8 +787,13 @@ def add_output(campaign_id, content_type_id, publish_date_iso, title=None, platf
 
 def create_campaign(*, title, publish_date_iso, content_type_id, platform_ids=None, owner_id=None,
                      assigned_user_id=None, concept="", notes="", created_by=None, source_idea_id=None,
-                     extra_output_type_ids=None):
-    """Used by the quick "+ Create Content" flow and the Ideas -> Schedule flow."""
+                     extra_output_type_ids=None, end_date_iso=None):
+    """Used by the quick "+ Create Content" flow and the Ideas -> Schedule flow.
+
+    end_date_iso (Nov 2026, Custom Events redesign): only meaningful for a
+    'custom' type output — a multi-day team off-time/unavailable block —
+    and left None for everything else, which keeps behaving as a single
+    publish_date the same as before."""
     ct = get_content_type(content_type_id)
     campaign_id = db.execute(
         """INSERT INTO campaigns
@@ -796,7 +802,8 @@ def create_campaign(*, title, publish_date_iso, content_type_id, platform_ids=No
            VALUES (?, ?, ?, ?, 'planned', ?, ?, 'manual', ?, ?, datetime('now'), datetime('now'))""",
         (title, concept, notes, publish_date_iso, owner_id, ct["id"], source_idea_id, created_by),
     )
-    add_output(campaign_id, ct["id"], publish_date_iso, platform_ids=platform_ids, assigned_user_id=assigned_user_id)
+    add_output(campaign_id, ct["id"], publish_date_iso, platform_ids=platform_ids,
+               assigned_user_id=assigned_user_id, end_date_iso=end_date_iso)
     for extra_id in (extra_output_type_ids or []):
         add_output(campaign_id, extra_id, publish_date_iso, assigned_user_id=assigned_user_id)
     task_engine.generate_tasks_for_campaign(campaign_id)

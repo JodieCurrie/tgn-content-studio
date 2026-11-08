@@ -105,6 +105,14 @@ _COLUMN_MIGRATIONS = [
     ("content_ideas", "canva_status", "TEXT NOT NULL DEFAULT 'none'"),
     ("content_ideas", "canva_design_link", "TEXT"),
     ("content_ideas", "canva_generated_at", "TEXT"),
+    # Custom Events redesign (Nov 2026, per Jodie): these are team
+    # off-time/unavailability blocks, not content, and can now cover a
+    # date range instead of a single day — end_date NULL means "same as
+    # publish_date" (a single-day event), so every existing row (and every
+    # non-custom output, which never sets this) keeps behaving exactly as
+    # before with no backfill needed. See app/routes/calendar.py
+    # _custom_events / app/static/js/calendar.js renderCustomEventBars.
+    ("content_outputs", "end_date", "TEXT"),
 ]
 
 
