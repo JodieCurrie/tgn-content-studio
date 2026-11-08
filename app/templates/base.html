@@ -4,13 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}TGN Content Studio{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v=2026-11b">
 
-  <!-- PWA: installable "Add to Home Screen" + push notifications (Sept) -->
-  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <!-- PWA: installable "Add to Home Screen" + push notifications (Sept).
+       The ?v= on the icon/manifest links (Nov 2026, after the logo
+       restyle) forces browsers to re-fetch instead of serving the old
+       favicon from cache at the same URL — browsers are notoriously sticky
+       about favicons specifically. Bump it again next time any icon file
+       changes. Doesn't help an already-installed phone home-screen icon
+       (that's cached at install time, independent of the URL) — that one
+       needs removing and re-adding "Add to Home Screen". -->
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}?v=2026-11b">
   <meta name="theme-color" content="#FAF8F3">
-  <link rel="icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
-  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+  <link rel="icon" href="{{ url_for('static', filename='icons/icon-192.png') }}?v=2026-11b">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}?v=2026-11b">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="TGN Studio">
