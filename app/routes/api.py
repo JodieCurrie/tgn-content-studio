@@ -157,6 +157,15 @@ def update_output(output_id):
     # if an old client still sends it.
     allowed = {"assigned_user_id", "title", "publish_date", "end_date"}
     fields = {k: v for k, v in data.items() if k in allowed}
+    # Custom Events redesign (Nov 2026): this is also what the calendar's own
+    # drag-resize handles call (dragging either end of the bar) — same
+    # start-before-end guard as the create-modal's date range, checked
+    # against whichever of the two this particular PATCH isn't touching.
+    if "publish_date" in fields or "end_date" in fields:
+        new_start = fields.get("publish_date", output["publish_date"])
+        new_end = fields.get("end_date", output["end_date"])
+        if new_start and new_end and new_end < new_start:
+            return jsonify({"error": "End date can't be before the start date."}), 400
     if fields:
         set_clause = ", ".join(f"{k} = ?" for k in fields)
         db.execute(f"UPDATE content_outputs SET {set_clause} WHERE id = ?", (*fields.values(), output_id))
