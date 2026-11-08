@@ -1,7 +1,7 @@
 import calendar as pycal
 from datetime import date, timedelta
 
-from flask import Blueprint, render_template, request, g
+from flask import Blueprint, render_template, request, g, jsonify
 
 from .. import db
 from ..auth import login_required
@@ -108,7 +108,12 @@ def _outputs_by_day(start, end):
                JOIN campaigns c ON c.id = o.campaign_id
                JOIN content_types ct ON ct.id = o.content_type_id
                LEFT JOIN users u ON u.id = o.assigned_user_id
-               WHERE o.publish_date BETWEEN ? AND ?
+               -- Custom Events redesign (Nov 2026): these are team off-time
+               -- blocks, not content — they never mix into the regular post
+               -- card list any more. See _custom_events below, drawn as its
+               -- own continuous bar by calendar.js (renderCustomEventBars),
+               -- not as a per-day .content-card.
+               WHERE ct.key != 'custom' AND o.publish_date BETWEEN ? AND ?
                ORDER BY o.publish_date, o.sort_order, o.id""",
             (start.isoformat(), end.isoformat()),
         )
@@ -117,6 +122,37 @@ def _outputs_by_day(start, end):
     for r in rows:
         by_day.setdefault(r["publish_date"], []).append(r)
     return by_day
+
+
+def _custom_events(start, end):
+    """Custom Events (Part 19, redesigned Nov 2026 per Jodie): team
+    unavailable/off-time blocks, with an optional end_date for a multi-day
+    block (NULL end_date == a single-day event, same as publish_date).
+    Returns a flat list (range-overlap against [start, end], not grouped by
+    day) — calendar.js fetches this from /calendar/custom-events and draws
+    one continuous bar per event across whichever rendered day cells it
+    actually touches, rather than the server trying to pre-slice it into
+    per-day pieces."""
+    rows = db.rows_to_list(
+        db.query(
+            """SELECT o.id AS id, o.campaign_id, o.publish_date AS start, o.end_date AS end,
+                      c.title AS title, ct.color AS color,
+                      u.id AS owner_id, u.name AS owner_name
+               FROM content_outputs o
+               JOIN campaigns c ON c.id = o.campaign_id
+               JOIN content_types ct ON ct.id = o.content_type_id
+               LEFT JOIN users u ON u.id = o.assigned_user_id
+               WHERE ct.key = 'custom'
+                 AND o.publish_date <= ?
+                 AND COALESCE(o.end_date, o.publish_date) >= ?
+               ORDER BY o.publish_date, o.id""",
+            (end.isoformat(), start.isoformat()),
+        )
+    )
+    for r in rows:
+        if not r["end"]:
+            r["end"] = r["start"]
+    return rows
 
 
 def _meetings_by_day(start, end):
@@ -333,6 +369,30 @@ def month_fragment_before():
         segments=segments, by_day=by_day, meetings_by_day=meetings_by_day,
         deadlines_by_day=deadlines_by_day, today=date.today(),
     )
+
+
+@bp.route("/calendar/custom-events")
+@login_required
+def custom_events_json():
+    """Feeds calendar.js's renderCustomEventBars (Nov 2026 Custom Events
+    redesign) — deliberately a separate small JSON endpoint rather than
+    something threaded through every HTML view/fragment above: the month
+    view, its two infinite-scroll fragments, and the 2-week view all load
+    different date ranges through completely different code paths, and
+    this one query covers all of them without touching any of that
+    rendering. `from`/`to` are plain ISO dates (unlike the month-fragment
+    routes, these don't have to land on a Sunday — the week view's range
+    doesn't)."""
+    from_str = request.args.get("from")
+    to_str = request.args.get("to")
+    if not from_str or not to_str:
+        return jsonify({"error": "Missing from/to"}), 400
+    try:
+        start = date.fromisoformat(from_str)
+        end = date.fromisoformat(to_str)
+    except ValueError:
+        return jsonify({"error": "Invalid date"}), 400
+    return jsonify(_custom_events(start, end))
 
 
 WEEK_VIEW_SPAN_DAYS = 14  # Part 23: a 2-week snippet, not just the current week

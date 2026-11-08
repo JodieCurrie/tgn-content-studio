@@ -68,6 +68,14 @@ def quick_create():
     assigned_user_id = data.get("assigned_user_id") or None
     owner_id = data.get("owner_id") or g.user["id"]
 
+    # Custom Events redesign (Nov 2026): a Custom Event can cover a date
+    # range instead of just one day — end_date is ignored for every other
+    # content type (create_campaign/add_output only persist it on the
+    # output row; nothing else reads it).
+    end_date = data.get("end_date") or None
+    if end_date and end_date < publish_date:
+        return jsonify({"error": "End date can't be before the start date."}), 400
+
     campaign_id = content_module.create_campaign(
         title=title,
         publish_date_iso=publish_date,
@@ -78,6 +86,7 @@ def quick_create():
         concept=data.get("concept", ""),
         created_by=g.user["id"],
         extra_output_type_ids=extra_output_type_ids,
+        end_date_iso=end_date,
     )
     return jsonify({"campaign_id": campaign_id})
 
@@ -146,7 +155,7 @@ def update_output(output_id):
     # Sept: status is never hand-set any more (see pipeline.sync_output_status
     # / mark_output_published) — deliberately left out of the allow-list even
     # if an old client still sends it.
-    allowed = {"assigned_user_id", "title", "publish_date"}
+    allowed = {"assigned_user_id", "title", "publish_date", "end_date"}
     fields = {k: v for k, v in data.items() if k in allowed}
     if fields:
         set_clause = ", ".join(f"{k} = ?" for k in fields)
