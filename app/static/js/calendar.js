@@ -308,26 +308,40 @@ function saveCalFilterState(state) {
   } catch (e) { /* private browsing / storage disabled — filters just won't persist */ }
 }
 
+// Nov 2026, per Jodie: Custom Events flip the old "visible unless you
+// opted out" default on its head — a person's off-time block shouldn't
+// clutter everyone's calendar until someone deliberately ticks their name.
+// An unassigned custom event (no owner, so no name to tick) still falls
+// back to visible, since there'd otherwise be no control that could ever
+// show it. Deadlines/Posting schedule keep the original opt-out default.
+function calFilterDefaultVisible(cat, owner) {
+  return cat !== "custom" || !owner;
+}
+
 function applyCalendarFilters() {
   const state = loadCalFilterState();
   document.querySelectorAll("[data-filter-cat]").forEach(el => {
-    const key = calFilterKey(el.dataset.filterCat, el.dataset.filterOwner);
-    const visible = state[key] !== false;
+    const cat = el.dataset.filterCat;
+    const owner = el.dataset.filterOwner;
+    const key = calFilterKey(cat, owner);
+    const visible = key in state ? state[key] !== false : calFilterDefaultVisible(cat, owner);
     el.classList.toggle("cal-filtered-out", !visible);
   });
 }
 
 /* Each person collapses into a <summary> pill (see render_filter_panel) —
    the small dot next to their name is the only hint, while it's closed,
-   that one of their two checkboxes (Custom events / Deadlines) is
-   currently unchecked, so narrowing the calendar down doesn't require
-   opening every person's dropdown just to remember what's hidden. */
+   that one of their two checkboxes (Custom events / Deadlines) is in a
+   NON-default state, so narrowing the calendar down doesn't require
+   opening every person's dropdown just to remember what's changed. (Custom
+   events defaults to off, Deadlines defaults to on — see
+   calFilterDefaultVisible — so "checked" alone no longer means "default".) */
 function updateCalFilterBadges() {
   document.querySelectorAll(".cal-filter-badge").forEach(badge => {
     const owner = badge.dataset.owner;
     const ownerChecks = document.querySelectorAll(`.js-cal-filter[data-owner="${owner}"]`);
-    const allChecked = Array.from(ownerChecks).every(cb => cb.checked);
-    badge.hidden = allChecked;
+    const allDefault = Array.from(ownerChecks).every(cb => cb.checked === calFilterDefaultVisible(cb.dataset.cat, cb.dataset.owner));
+    badge.hidden = allDefault;
   });
 }
 
@@ -337,7 +351,7 @@ function initCalendarFilterPanel() {
   const state = loadCalFilterState();
   checkboxes.forEach(cb => {
     const key = calFilterKey(cb.dataset.cat, cb.dataset.owner);
-    cb.checked = state[key] !== false;
+    cb.checked = key in state ? state[key] !== false : calFilterDefaultVisible(cb.dataset.cat, cb.dataset.owner);
     cb.addEventListener("change", () => {
       const s = loadCalFilterState();
       s[calFilterKey(cb.dataset.cat, cb.dataset.owner)] = cb.checked;
@@ -461,20 +475,50 @@ function renderCustomEventBars() {
       prevTop = top;
     });
 
-    runs.forEach(run => {
+    // Nov 2026, per Jodie: show whose block this is right on the bar
+    // itself (first name only — "Jodie Currie" doesn't fit a 19px pill),
+    // since these are now hidden by default and only surfaced per-person.
+    const firstName = (ev.owner_name || "").split(" ")[0];
+    const labelText = firstName ? `${firstName} - ${ev.title}` : ev.title;
+
+    runs.forEach((run, runIndex) => {
       const first = run[0].getBoundingClientRect();
       const last = run[run.length - 1].getBoundingClientRect();
       const bar = document.createElement("div");
       bar.className = "cal-event-bar js-open-campaign";
       bar.dataset.campaignId = ev.campaign_id;
+      bar.dataset.outputId = ev.id;
       bar.dataset.filterCat = "custom";
       bar.dataset.filterOwner = ev.owner_id || "";
-      bar.title = ev.owner_name ? `${ev.title} — ${ev.owner_name}` : ev.title;
-      bar.textContent = ev.title;
+      bar.title = labelText;
       bar.style.left = (first.left - gridRect.left) + "px";
       bar.style.top = (first.top - gridRect.top + 6) + "px";
       bar.style.width = Math.max(last.right - first.left, 20) + "px";
       bar.style.background = ev.color || "#C895D5";
+
+      // Only the run touching the event's TRUE start/end gets a handle —
+      // a middle run (the event continues past this row in month view)
+      // has nothing to drag, since neither of its visual edges is a real
+      // boundary of the event.
+      if (runIndex === 0) {
+        const leftHandle = document.createElement("div");
+        leftHandle.className = "cal-event-handle cal-event-handle-left";
+        leftHandle.dataset.edge = "start";
+        bar.appendChild(leftHandle);
+      }
+
+      const label = document.createElement("span");
+      label.className = "cal-event-label";
+      label.textContent = labelText;
+      bar.appendChild(label);
+
+      if (runIndex === runs.length - 1) {
+        const rightHandle = document.createElement("div");
+        rightHandle.className = "cal-event-handle cal-event-handle-right";
+        rightHandle.dataset.edge = "end";
+        bar.appendChild(rightHandle);
+      }
+
       grid.appendChild(bar);
     });
   });
@@ -483,6 +527,88 @@ function renderCustomEventBars() {
   // just needs to run once more now that they actually exist in the DOM.
   applyCalendarFilters();
 }
+
+/* ---------------------------------------------------- resize a custom
+   event by dragging its left/right edge (Nov 2026, per Jodie: "click on a
+   custom event and drag its right end... or left end... without having to
+   click on the event to open a dialogue box"). A plain mousedown/move/up
+   drag rather than HTML5 drag-and-drop, since it needs to track a pixel
+   position against the day-cell grid, not drop onto one target element.
+
+   While dragging, the bars themselves go pointer-events:none (see
+   .cal-resizing in app.css) so elementFromPoint can see straight through
+   to the actual day cell underneath the pointer — otherwise the very bar
+   being dragged (or a neighbour) would always be the topmost hit.
+
+   Uses the same PATCH /api/outputs/<id> endpoint the campaign panel's own
+   Start/Through date fields use, so permissions are identical: anyone
+   assigned to the event (or an admin) can drag it — same as everyone
+   else's content. */
+let calEventResize = null;
+
+function calEventDateAtPoint(clientX, clientY) {
+  const el = document.elementFromPoint(clientX, clientY);
+  const cell = el && el.closest("[data-date]");
+  return cell ? cell.dataset.date : null;
+}
+
+document.addEventListener("mousedown", (e) => {
+  const handle = e.target.closest(".cal-event-handle");
+  if (!handle) return;
+  const bar = handle.closest(".cal-event-bar");
+  const ev = bar && calEventsCache.get(parseInt(bar.dataset.outputId, 10));
+  if (!ev) return;
+  e.preventDefault();
+  e.stopPropagation();
+  calEventResize = {
+    outputId: bar.dataset.outputId,
+    edge: handle.dataset.edge,
+    ev,
+    originalStart: ev.start,
+    originalEnd: ev.end,
+    changed: false,
+  };
+  document.body.classList.add("cal-resizing");
+});
+
+// A click fires on mouseup right after a drag that started on the handle —
+// swallow it so it never reaches the document-level "open campaign panel"
+// listener (the handle sits inside a .js-open-campaign bar).
+document.addEventListener("click", (e) => {
+  if (e.target.closest(".cal-event-handle")) e.stopPropagation();
+}, true);
+
+document.addEventListener("mousemove", (e) => {
+  if (!calEventResize) return;
+  const iso = calEventDateAtPoint(e.clientX, e.clientY);
+  if (!iso) return;
+  const { ev, edge } = calEventResize;
+  if (edge === "start") {
+    if (iso === ev.start || iso > ev.end) return;
+    ev.start = iso;
+  } else {
+    if (iso === ev.end || iso < ev.start) return;
+    ev.end = iso;
+  }
+  calEventResize.changed = true;
+  renderCustomEventBars();
+});
+
+document.addEventListener("mouseup", async () => {
+  if (!calEventResize) return;
+  const state = calEventResize;
+  calEventResize = null;
+  document.body.classList.remove("cal-resizing");
+  if (!state.changed) return;
+  const payload = state.edge === "start" ? { publish_date: state.ev.start } : { end_date: state.ev.end };
+  try {
+    await tgnFetch(`/api/outputs/${state.outputId}`, { method: "PATCH", body: JSON.stringify(payload) });
+    window.location.reload();
+  } catch (err) {
+    alert(err.message);
+    window.location.reload(); // reset to the server's actual dates
+  }
+});
 
 let calEventResizeTimer = null;
 window.addEventListener("resize", () => {

@@ -232,6 +232,30 @@ function saveField(el) {
   }).catch(() => {});
 }
 
+// ------------------------------------------------- custom event panel fields
+// Custom Events redesign (Nov 2026, per Jodie): the simplified panel for a
+// Custom Event edits the OUTPUT row (assigned_user_id/publish_date/end_date),
+// not the campaign's own text fields — same PATCH /api/outputs/<id> the
+// calendar's own drag-resize handles use (see calendar.js calEventResize),
+// so a date typed here and a date dragged on the calendar stay consistent.
+// A full reload (rather than a silent autosave) because these fields also
+// move/reposition/relabel the event's bar on the calendar underneath.
+document.addEventListener("change", async (e) => {
+  const isDate = e.target.classList.contains("js-custom-event-date");
+  const isAssignee = e.target.classList.contains("js-custom-event-assignee");
+  if (!isDate && !isAssignee) return;
+  const outputId = e.target.dataset.outputId;
+  if (!outputId) return;
+  const field = isDate ? e.target.dataset.field : "assigned_user_id";
+  const value = e.target.value || null;
+  try {
+    await tgnFetch(`/api/outputs/${outputId}`, { method: "PATCH", body: JSON.stringify({ [field]: value }) });
+    window.location.reload();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
 // ---------------------------------------------------------------- tasks
 document.addEventListener("change", (e) => {
   // Sept redesign: no more manual multi-value status dropdown anywhere —
