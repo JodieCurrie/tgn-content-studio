@@ -338,12 +338,36 @@ height: 19px;
 padding: 0 9px;
 border-radius: 999px;
 font-size: 11px; font-weight: 700; color: #fff;
-white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 box-shadow: 0 1px 3px rgba(70, 48, 65, .18);
 cursor: pointer;
 z-index: 3;
 }
 .cal-event-bar:hover { filter: brightness(0.95); }
+.cal-event-label {
+flex: 1; min-width: 0;
+white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Drag handles (Nov 2026, per Jodie): a thin grab strip at each end of the
+   bar that only appears where that end is the event's real start/end (see
+   renderCustomEventBars) — dragging one edits just that date, no dialogue
+   box needed. Nudges the label's padding out of the way so the handle
+   isn't sitting on top of the text, and only a hover/active hint shows —
+   kept subtle so it doesn't read as a second control on every bar. */
+.cal-event-handle {
+position: absolute; top: 0; bottom: 0; width: 10px;
+cursor: ew-resize;
+z-index: 1;
+}
+.cal-event-handle-left { left: 0; border-radius: 999px 0 0 999px; }
+.cal-event-handle-right { right: 0; border-radius: 0 999px 999px 0; }
+.cal-event-bar:has(.cal-event-handle-left) .cal-event-label { margin-left: 6px; }
+.cal-event-bar:has(.cal-event-handle-right) .cal-event-label { margin-right: 6px; }
+.cal-event-handle:hover, .cal-event-handle:active { background: rgba(255, 255, 255, .4); }
+/* While a drag is in progress: let the mouse "see through" every bar to
+   the real day cell underneath (elementFromPoint in calendar.js), and
+   stop text selection from kicking in as the pointer moves fast. */
+body.cal-resizing { user-select: none; }
+body.cal-resizing .cal-event-bar { pointer-events: none; }
 
 /* ---------------------------------------------------------------- lists */
 .list-row {
