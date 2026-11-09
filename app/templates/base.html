@@ -112,6 +112,10 @@
     // Event's "Assign to" to whoever's actually creating it, instead of
     // Unassigned — see applyCustomEventFormMode in app.js.
     window.TGN_CURRENT_USER_ID = {{ current_user.id|tojson }};
+    // Nov 2026, per Jodie: team members' calendar defaults to "assigned to
+    // me only" (see calFilterScopeDefault in calendar.js) — admins keep
+    // seeing everything by default.
+    window.TGN_CURRENT_USER_IS_ADMIN = {{ current_user.role_is_admin|tojson }};
   </script>
   <script src="{{ url_for('static', filename='js/push.js') }}"></script>
   {% if pending_pipeline_confirmations %}
