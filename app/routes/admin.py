@@ -230,7 +230,7 @@ def scheduling_rule_new():
     filler_created = content_module.fill_weekly_filler_gaps()
     flash(
         f"Rule created — {len(created)} upcoming date(s) generated "
-        f"({len(filler_created)} filler gap-day post(s) auto-scheduled to keep every week at the 4-day minimum).",
+        f"({len(filler_created)} filler gap-day post(s) auto-scheduled to keep every day at the daily posting target).",
         "success",
     )
     return redirect(url_for("admin.scheduling_rules"))
