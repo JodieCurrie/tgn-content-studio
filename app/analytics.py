@@ -116,7 +116,11 @@ def suggest_filler(anchor=None, limit=3):
     rows = outputs_in_range(start, end)
     used_keys = {r["type_key"] for r in rows}
     filler_types = db.rows_to_list(
-        db.query("SELECT * FROM content_types WHERE is_filler = 1 AND archived = 0 ORDER BY sort_order")
+        db.query(
+            """SELECT * FROM content_types
+               WHERE is_filler = 1 AND archived = 0 AND category_key != 'custom'
+               ORDER BY sort_order"""
+        )
     )
     filler_types = [ft for ft in filler_types if ft["key"] not in content_module.FILLER_AUTOFILL_EXCLUDED_TYPE_KEYS]
     # prefer filler types not already used this week, and de-prioritise video

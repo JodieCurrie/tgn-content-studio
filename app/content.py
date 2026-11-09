@@ -367,19 +367,39 @@ def unschedule_idea(idea):
 
 
 # ---------------------------------------------------------------------------
-# Weekly filler gap-fill (Sept). Jodie's posting-frequency target is measured
-# in DAYS, not raw post count: "3-4 posts a week" really meant "post on a
-# minimum of 4 different days a week" — two posts landing on the same day
-# (usually the same content re-cut for a second platform) still only count
-# as one posting day. Monthly + Targeted scheduling rules already cover some
-# days each week on their own rhythm; this tops up every week in the horizon
-# with extra Filler posts on weekdays that don't already have anything,
-# spread out between the days that do, until each week hits the minimum.
+# Weekly filler gap-fill. Monthly + Targeted scheduling rules already cover
+# some days each week on their own rhythm; this tops up every day in the
+# horizon with extra Filler posts until it hits the daily posting target.
 # Runs wherever the recurring-rule horizon already gets materialized (see
 # scripts/seed.py and admin.py's scheduling-rule routes) since there's no
 # background scheduler on Render's free tier to run it on its own.
+#
+# Nov 2026, per Jodie ("increase my posting to two times per day... no
+# posting on Sundays"): bumped from "post on at least 4 DAYS a week" to
+# "post TWICE a day, every day Monday-Saturday" — Saturday is now a posting
+# day too, and Sunday stays completely off. The unit changed from
+# days-per-week to posts-per-day: a day that already has one real post
+# (e.g. Testimony's single Tuesday output) only needs ONE more to reach the
+# target, not two. Whichever post tops a day up to the target and wasn't
+# already there from a real scheduling rule or the original per-day pick is
+# always a TikTok Style Reel specifically, per Jodie's request — see
+# _daily_gap_slots.
 # ---------------------------------------------------------------------------
-MIN_POSTING_DAYS_PER_WEEK = 4
+POSTS_PER_DAY_TARGET = 2
+
+# Sunday (Python Mon=0..Sun=6) is the only day that never auto-fills.
+POSTING_EXCLUDED_WEEKDAYS = (6,)
+
+# Kept for the dashboard's "posting days" metric (analytics.py) and for the
+# drag-rebalance path below, which still reasons in whole posting days
+# rather than the finer per-day post count the main gap-fill uses — 6 now
+# that Saturday counts as a posting day too (Nov 2026, was 4).
+MIN_POSTING_DAYS_PER_WEEK = 6
+
+# The TikTok Style Reel is the forced type for every "additional" post a day
+# needs beyond its first (Nov 2026, per Jodie) — looked up by key rather
+# than hardcoded since content_type ids vary per database.
+TIKTOK_REEL_TYPE_KEY = "tiktok_style"
 
 # The two "needs a source clip already in hand" filler types stay out of
 # auto-fill, same as they're excluded from every recurring scheduling rule
@@ -390,19 +410,48 @@ FILLER_AUTOFILL_EXCLUDED_TYPE_KEYS = IDEA_REQUIRES_LINK_TYPE_KEYS
 
 def posting_days_in_range(start, end):
     """The set of ISO dates in [start, end] that already have at least one
-    campaign scheduled — the unit Jodie actually cares about. Two outputs
-    sharing a campaign (e.g. a Short + its YouTube companion) share one
-    publish_date, so they naturally count as a single posting day here."""
+    REAL campaign scheduled — the unit the dashboard and the drag-rebalance
+    path reason in. Two outputs sharing a campaign (e.g. a Short + its
+    YouTube companion) share one publish_date, so they naturally count as a
+    single posting day here. Nov 2026 fix: a Custom Event (someone's off-time
+    block, never actual content — see category_key='custom') no longer
+    counts as a "posting day" — it was wrongly inflating this before, which
+    is also what let the gap-filler below think a day covered by one was
+    already taken care of."""
     rows = db.query(
-        "SELECT DISTINCT publish_date FROM campaigns WHERE publish_date BETWEEN ? AND ?",
+        """SELECT DISTINCT c.publish_date FROM campaigns c
+           JOIN content_types ct ON ct.id = c.primary_content_type_id
+           WHERE ct.category_key != 'custom' AND c.publish_date BETWEEN ? AND ?""",
         (start.isoformat(), end.isoformat()),
     )
     return {r["publish_date"] for r in rows}
 
 
+def _output_counts_by_day(start, end):
+    """How many real (non-custom) outputs already exist on each day in
+    [start, end] — the finer unit _daily_gap_slots tops up to
+    POSTS_PER_DAY_TARGET, one post at a time, as opposed to
+    posting_days_in_range's coarser "does this day have anything at all"
+    check used by the dashboard and the drag-rebalance path."""
+    rows = db.rows_to_list(
+        db.query(
+            """SELECT o.publish_date AS d, COUNT(*) AS n
+               FROM content_outputs o JOIN content_types ct ON ct.id = o.content_type_id
+               WHERE ct.category_key != 'custom' AND o.publish_date BETWEEN ? AND ?
+               GROUP BY o.publish_date""",
+            (start.isoformat(), end.isoformat()),
+        )
+    )
+    return {r["d"]: r["n"] for r in rows}
+
+
 def _eligible_autofill_filler_types():
     types = db.rows_to_list(
-        db.query("SELECT * FROM content_types WHERE is_filler = 1 AND archived = 0 ORDER BY sort_order")
+        db.query(
+            """SELECT * FROM content_types
+               WHERE is_filler = 1 AND archived = 0 AND category_key != 'custom'
+               ORDER BY sort_order"""
+        )
     )
     return [t for t in types if t["key"] not in FILLER_AUTOFILL_EXCLUDED_TYPE_KEYS]
 
@@ -426,14 +475,22 @@ def _pick_filler_type_for_gap(used_type_ids_this_week):
     return pool[0]
 
 
+def _is_posting_weekday(d):
+    """Nov 2026, per Jodie: every day except Sunday is now a posting day
+    (Saturday included) — was Mon-Fri only."""
+    return d.weekday() not in POSTING_EXCLUDED_WEEKDAYS
+
+
 def _weekday_gap_candidates(week_start, week_end, today, existing_days):
-    """Weekdays (Mon-Fri) in this week that are today or later and don't
-    already have something scheduled. Weekends are never used for
-    auto-fill, and a day already in the past can't be scheduled into."""
+    """Posting days (Mon-Sat) in this week that are today or later and don't
+    already have something scheduled. Sunday is never used for auto-fill,
+    and a day already in the past can't be scheduled into. Used by the
+    coarser drag-rebalance path below — the main gap-fill uses the finer
+    per-day _daily_gap_slots instead."""
     candidates = []
     d = week_start
     while d <= week_end:
-        if d.weekday() < 5 and d >= today and d.isoformat() not in existing_days:
+        if _is_posting_weekday(d) and d >= today and d.isoformat() not in existing_days:
             candidates.append(d)
         d += timedelta(days=1)
     return candidates
@@ -459,7 +516,7 @@ def _spread_pick(candidates, count):
     return picked
 
 
-def _create_autofill_filler_campaign(ct, publish_date_iso, idea=None):
+def _create_autofill_filler_campaign(ct, publish_date_iso, idea=None, forced_tiktok=False):
     title = idea["title"] if idea else ct["label"]
     notes = idea_notes_with_links(idea) if idea else ""
     campaign_id = db.execute(
@@ -474,24 +531,62 @@ def _create_autofill_filler_campaign(ct, publish_date_iso, idea=None):
     add_output(campaign_id, ct["id"], publish_date_iso)
     task_engine.generate_tasks_for_campaign(campaign_id)
     _spawn_paired_and_followup_content(campaign_id, ct, publish_date_iso)
+    note = (
+        "Auto-scheduled as the extra TikTok Style Reel toward the 2-posts-a-day target."
+        if forced_tiktok else
+        "Auto-scheduled to fill a gap day toward the daily posting target."
+    )
     db.execute(
         "INSERT INTO activity_log (campaign_id, actor_id, message) VALUES (?, NULL, ?)",
-        (campaign_id, "Auto-scheduled to fill a gap day toward the 4-day-a-week posting minimum."),
+        (campaign_id, note),
     )
     return campaign_id
 
 
+def _daily_gap_slots(week_start, week_end, today, counts_by_day):
+    """Every post this week's posting days (Mon-Sat, today or later) still
+    need to reach POSTS_PER_DAY_TARGET, as (day, forced_tiktok) pairs. A day
+    starting from zero real posts gets one ordinary "variety" slot (the same
+    rotate-through-filler-types pick this always used) plus one forced
+    TikTok Style Reel slot; a day that already has at least one real post
+    (from a scheduling rule, a paired companion output, or a prior fill)
+    only needs the forced TikTok slot(s) to top it up — Jodie asked for the
+    ADDITIONAL posts specifically to be TikTok Style Reels, not the ones
+    already there."""
+    slots = []
+    d = week_start
+    while d <= week_end:
+        if _is_posting_weekday(d) and d >= today:
+            existing = counts_by_day.get(d.isoformat(), 0)
+            shortfall = POSTS_PER_DAY_TARGET - existing
+            if shortfall > 0:
+                if existing == 0:
+                    slots.append((d, False))
+                    shortfall -= 1
+                slots.extend((d, True) for _ in range(shortfall))
+        d += timedelta(days=1)
+    return slots
+
+
+def _oldest_unscheduled_tiktok_idea():
+    tiktok_ct = get_content_type_by_key(TIKTOK_REEL_TYPE_KEY)
+    if not tiktok_ct:
+        return None, None
+    idea = db.row_to_dict(
+        db.query_one(
+            """SELECT * FROM content_ideas WHERE content_type_id = ? AND scheduled_campaign_id IS NULL
+               ORDER BY created_at ASC LIMIT 1""",
+            (tiktok_ct["id"],),
+        )
+    )
+    return idea, tiktok_ct
+
+
 def _fill_gap_days_for_week(week_start, week_end, today):
-    existing_days = posting_days_in_range(week_start, week_end)
-    needed = MIN_POSTING_DAYS_PER_WEEK - len(existing_days)
-    if needed <= 0:
+    counts_by_day = _output_counts_by_day(week_start, week_end)
+    slots = _daily_gap_slots(week_start, week_end, today, counts_by_day)
+    if not slots:
         return []
-
-    candidates = _weekday_gap_candidates(week_start, week_end, today, existing_days)
-    if not candidates:
-        return []  # nothing left this week to schedule into — already past, or weekends only
-
-    chosen_days = _spread_pick(candidates, min(needed, len(candidates)))
 
     used_type_ids_this_week = {
         r["primary_content_type_id"]
@@ -503,14 +598,24 @@ def _fill_gap_days_for_week(week_start, week_end, today):
     }
 
     created = []
-    for day in chosen_days:
-        idea, ct = _oldest_unscheduled_filler_idea()
+    for day, forced_tiktok in slots:
+        if forced_tiktok:
+            idea, ct = _oldest_unscheduled_tiktok_idea()
+            if not ct:
+                # TikTok Style Reel got archived/removed — fall back to the
+                # usual variety pick rather than silently skipping the day.
+                idea, ct = _oldest_unscheduled_filler_idea()
+                if not ct:
+                    ct = _pick_filler_type_for_gap(used_type_ids_this_week)
+                    idea = None
+        else:
+            idea, ct = _oldest_unscheduled_filler_idea()
+            if not ct:
+                ct = _pick_filler_type_for_gap(used_type_ids_this_week)
+                idea = None
         if not ct:
-            ct = _pick_filler_type_for_gap(used_type_ids_this_week)
-            idea = None
-        if not ct:
-            break
-        campaign_id = _create_autofill_filler_campaign(ct, day.isoformat(), idea)
+            continue
+        campaign_id = _create_autofill_filler_campaign(ct, day.isoformat(), idea, forced_tiktok=forced_tiktok)
         created.append(campaign_id)
         used_type_ids_this_week.add(ct["id"])
     return created
@@ -637,10 +742,10 @@ def rebalance_filler_for_weeks(week_starts, today=None, actor_id=None, reason=""
 
 
 def fill_weekly_filler_gaps(today=None, horizon_weeks=52):
-    """Tops up every week from the current one through the horizon with
-    extra Filler posts so each week hits MIN_POSTING_DAYS_PER_WEEK posting
-    days. Safe to call repeatedly — a week that already has enough posting
-    days, or a day that already has something scheduled, is left alone.
+    """Tops up every day from today through the horizon with extra Filler
+    posts until it has POSTS_PER_DAY_TARGET posts (Nov 2026: every day
+    Monday-Saturday, Sunday always skipped — see _daily_gap_slots). Safe to
+    call repeatedly — a day that already has enough posts is left alone.
 
     horizon_weeks defaults to a full year (Sept, per Jodie: the posting
     rhythm itself should keep auto-scheduling indefinitely, not stop after

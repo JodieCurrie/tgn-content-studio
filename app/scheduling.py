@@ -551,8 +551,8 @@ def move_campaign_to_date(campaign_id, new_date_iso):
 
 def _rebalance_filler_after_move(category_key, actor_id, touched_dates=None, wide_from=None, reason=""):
     """Sept, per Jodie: moving a Targeted (or Monthly) campaign off/onto a
-    day can push a week under the 4-post minimum, or it can drop a week that
-    was already under the minimum into range — either way the *existing*
+    day can push a week under the posting-days minimum, or it can drop a
+    week that was already under the minimum into range — either way the *existing*
     pool of Filler posts should be reshuffled to cover it automatically,
     without waiting for the next horizon sync. Deliberately does nothing
     when the campaign that moved is Filler itself — a filler post dragged on
