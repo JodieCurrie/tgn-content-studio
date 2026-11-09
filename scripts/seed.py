@@ -88,7 +88,7 @@ CONTENT_TYPES = [
     # holiday, a busy period) rather than actual content, so they get their
     # own category — never counted as filler content or targeted for the
     # filler-cascade drag behaviour.
-    ("custom", "Custom Event", "#D9D9D9", "custom", 1, 0, 0, 1, 5, [], 0),
+    ("custom", "Custom Event", "#D9D9D9", "custom", 0, 0, 0, 1, 5, [], 0),
 ]
 
 # Single-type options map straight through (unchanged); Filler Post and
@@ -352,7 +352,7 @@ def seed_data():
     created = scheduling.materialize_all_active_rules()
     print(f"Materialized {len(created)} rule-generated campaigns.")
     filler_created = content_module.fill_weekly_filler_gaps()
-    print(f"Auto-filled {len(filler_created)} filler gap-day campaign(s) toward the 4-day-a-week minimum.")
+    print(f"Auto-filled {len(filler_created)} filler gap-day campaign(s) toward the daily posting target.")
     _showcase_first_campaign()
     _migrate_sync_all_statuses()
     dbmod.get_db().commit()
@@ -1008,10 +1008,14 @@ def _seed_scheduling_rules(type_ids):
     _upsert_rule("testimony", "Testimony — first Tuesday of the month", "monthly_nth_weekday", 1,
                  anchor, RULE_HORIZON_WEEKS, "Monthly Testimony", nth=1)
 
-    # Blog Post — second-last Thursday of every month (Blog Post Video pairs
+    # Blog Post — last Thursday of every month (Blog Post Video pairs
     # automatically the same day — see content._spawn_paired_and_followup_content).
-    anchor = _roll_to_next_valid_month(lambda y, m: scheduling.second_last_weekday_of_month(y, m, 3), today.year, today.month)
-    _upsert_rule("blog", "Blog Post — second-last Thursday of the month", "monthly_second_last_weekday", 3,
+    # Nov 2026, per Jodie: was second-last Thursday; corrected to last
+    # Thursday — this re-run also needs the already-materialized second-last
+    # occurrences removed by hand, since _upsert_rule only changes the rule
+    # itself, never campaigns already generated under its old pattern.
+    anchor = _roll_to_next_valid_month(lambda y, m: scheduling.last_weekday_of_month(y, m, 3), today.year, today.month)
+    _upsert_rule("blog", "Blog Post — last Thursday of the month", "monthly_last_weekday", 3,
                  anchor, RULE_HORIZON_WEEKS, "Monthly Blog Post")
 
     # Podcast Episode — second Thursday of every third month. 3 Highlight/
