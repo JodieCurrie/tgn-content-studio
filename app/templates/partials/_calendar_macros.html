@@ -91,6 +91,16 @@
   <label class="calendar-filter-item calendar-filter-posting">
     <input type="checkbox" class="js-cal-filter" data-cat="posting" checked> Posting schedule
   </label>
+  {# Nov 2026, per Jodie: team members should land on just their own
+     assigned campaigns/snippets rather than the whole posting calendar —
+     admins still default to seeing everything. Real default is decided in
+     JS (calFilterScopeDefault, calendar.js) based on who's logged in; the
+     "checked" here is just a harmless initial paint. "Select all" below
+     also clears this, which is the "expand to see everything" escape
+     hatch. #}
+  <label class="calendar-filter-item calendar-filter-scope" title="Hide everyone else's posts — just show campaigns and snippets assigned to you">
+    <input type="checkbox" class="js-cal-filter-scope"> Assigned to me only
+  </label>
   <div class="cal-filter-people">
     {% for u in filter_users %}
     <details class="cal-filter-person">
