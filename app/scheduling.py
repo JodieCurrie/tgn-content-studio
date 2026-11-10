@@ -27,18 +27,16 @@ def _add_days(iso_date, n):
     return (d + timedelta(days=n)).isoformat()
 
 
-# Oct 2026, per Jodie: she doesn't want anything landing on a Saturday or a
-# Sunday — a recurring rule's rhythm, a drag/shift, or a rule's anchor date.
-# Centralised here so every date-picking path (recurring generation,
-# drag-and-drop, rule-shifting) goes through the same rule instead of each
-# needing its own check. Both weekend days bump forward to the following
-# Monday rather than back, since pushing a date earlier risks colliding with
-# whatever's already scheduled on the day before. (Originally just
-# _skip_sunday — widened to cover Saturday too once Jodie confirmed both
-# weekend days are off-limits, not just Sunday.)
+# Oct 2026, per Jodie: nothing should land on a day that's genuinely off
+# the posting calendar. Centralised here so every date-picking path
+# (recurring generation, drag-and-drop, rule-shifting) goes through the same
+# rule instead of each needing its own check. Nov 2026 update, per Jodie's
+# "2 posts a day, Mon-Sat" change: Saturday became a real posting day (and,
+# later, a weekly Scripture Expansion anchor day), so only Sunday still
+# bumps forward now — this used to also push Saturday to the following
+# Monday, which silently broke any rule anchored on a Saturday (it would
+# materialize on Monday instead) once Saturday stopped being off-limits.
 def _skip_sunday(d):
-    if d.weekday() == 5:  # Saturday
-        return d + timedelta(days=2)
     if d.weekday() == 6:  # Sunday
         return d + timedelta(days=1)
     return d

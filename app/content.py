@@ -3,6 +3,7 @@ Campaign/output business logic — creation, detail assembly, updates.
 Kept separate from routes/content.py (the blueprint) so scheduling.py can
 call create_campaign_from_rule() without importing Flask request handling.
 """
+import random
 from datetime import date, timedelta
 
 from . import db
@@ -390,6 +391,11 @@ POSTS_PER_DAY_TARGET = 2
 # Sunday (Python Mon=0..Sun=6) is the only day that never auto-fills.
 POSTING_EXCLUDED_WEEKDAYS = (6,)
 
+# Nov 2026, per Jodie: Podcast Episode is now monthly, and at least this
+# many Highlight/Question snippets get scattered across random days in that
+# same month — see _spawn_podcast_highlight_followups.
+PODCAST_HIGHLIGHT_MONTHLY_COUNT = 10
+
 # Kept for the dashboard's "posting days" metric (analytics.py) and for the
 # drag-rebalance path below, which still reasons in whole posting days
 # rather than the finer per-day post count the main gap-fill uses — 6 now
@@ -408,38 +414,54 @@ TIKTOK_REEL_TYPE_KEY = "tiktok_style"
 FILLER_AUTOFILL_EXCLUDED_TYPE_KEYS = IDEA_REQUIRES_LINK_TYPE_KEYS
 
 
+# Nov 2026, per Jodie: the daily posting target only counts a post if it
+# actually lands on Instagram or TikTok — a YouTube-only output (the
+# Targeted Video — YouTube long-form, the full Podcast Episode) or a
+# website-only one (the Blog Post itself, as opposed to its paired Blog Post
+# Video) doesn't count, even though it's real scheduled content, so that day
+# still needs another post to actually hit 2. Checked per OUTPUT via its own
+# output_platforms rows (whatever the content type's own default platforms
+# are, or whatever a person customised them to) rather than the content
+# type generically, since that's the actual ground truth of where a given
+# piece is really going out. A Custom Event (someone's off-time block) has
+# no platforms at all, so it's excluded automatically — no separate
+# category_key check needed any more.
+COUNTED_PLATFORM_KEYS = ("instagram", "tiktok")
+_COUNTED_PLATFORM_PLACEHOLDERS = ",".join("?" * len(COUNTED_PLATFORM_KEYS))
+
+
 def posting_days_in_range(start, end):
     """The set of ISO dates in [start, end] that already have at least one
-    REAL campaign scheduled — the unit the dashboard and the drag-rebalance
-    path reason in. Two outputs sharing a campaign (e.g. a Short + its
-    YouTube companion) share one publish_date, so they naturally count as a
-    single posting day here. Nov 2026 fix: a Custom Event (someone's off-time
-    block, never actual content — see category_key='custom') no longer
-    counts as a "posting day" — it was wrongly inflating this before, which
-    is also what let the gap-filler below think a day covered by one was
-    already taken care of."""
+    output counting toward the daily posting target (see
+    COUNTED_PLATFORM_KEYS) — the unit the dashboard and the drag-rebalance
+    path reason in. Two counted outputs sharing a campaign (e.g. a Short +
+    a highlight sharing its date) still just mean "this day has something,"
+    same as before."""
     rows = db.query(
-        """SELECT DISTINCT c.publish_date FROM campaigns c
-           JOIN content_types ct ON ct.id = c.primary_content_type_id
-           WHERE ct.category_key != 'custom' AND c.publish_date BETWEEN ? AND ?""",
-        (start.isoformat(), end.isoformat()),
+        f"""SELECT DISTINCT o.publish_date FROM content_outputs o
+           JOIN output_platforms op ON op.output_id = o.id
+           JOIN platforms p ON p.id = op.platform_id
+           WHERE p.key IN ({_COUNTED_PLATFORM_PLACEHOLDERS}) AND o.publish_date BETWEEN ? AND ?""",
+        COUNTED_PLATFORM_KEYS + (start.isoformat(), end.isoformat()),
     )
     return {r["publish_date"] for r in rows}
 
 
 def _output_counts_by_day(start, end):
-    """How many real (non-custom) outputs already exist on each day in
-    [start, end] — the finer unit _daily_gap_slots tops up to
+    """How many counted outputs (see COUNTED_PLATFORM_KEYS) already exist on
+    each day in [start, end] — the finer unit _daily_gap_slots tops up to
     POSTS_PER_DAY_TARGET, one post at a time, as opposed to
     posting_days_in_range's coarser "does this day have anything at all"
     check used by the dashboard and the drag-rebalance path."""
     rows = db.rows_to_list(
         db.query(
-            """SELECT o.publish_date AS d, COUNT(*) AS n
-               FROM content_outputs o JOIN content_types ct ON ct.id = o.content_type_id
-               WHERE ct.category_key != 'custom' AND o.publish_date BETWEEN ? AND ?
+            f"""SELECT o.publish_date AS d, COUNT(DISTINCT o.id) AS n
+               FROM content_outputs o
+               JOIN output_platforms op ON op.output_id = o.id
+               JOIN platforms p ON p.id = op.platform_id
+               WHERE p.key IN ({_COUNTED_PLATFORM_PLACEHOLDERS}) AND o.publish_date BETWEEN ? AND ?
                GROUP BY o.publish_date""",
-            (start.isoformat(), end.isoformat()),
+            COUNTED_PLATFORM_KEYS + (start.isoformat(), end.isoformat()),
         )
     )
     return {r["d"]: r["n"] for r in rows}
@@ -456,23 +478,35 @@ def _eligible_autofill_filler_types():
     return [t for t in types if t["key"] not in FILLER_AUTOFILL_EXCLUDED_TYPE_KEYS]
 
 
+# Nov 2026, per Jodie: she was seeing too many Quick Reels filling the
+# calendar and is happy to see far more TikTok Style Reels instead — so the
+# variety pick is now a weighted draw rather than a flat rotation. TikTok
+# also stays a candidate even in a week it's technically "already used":
+# the forced second-post-of-day slot (see _daily_gap_slots/POSTS_PER_DAY_TARGET)
+# hands TikTok to almost every posting day already, so excluding it from the
+# variety slot too (the normal "not used this week" dedup, below) would have
+# kept it out of that slot almost entirely and defeated the point.
+FILLER_TYPE_WEIGHTS = {"tiktok_style": 4, "quick_reel": 1}
+FILLER_TYPE_DEFAULT_WEIGHT = 2
+FILLER_TYPE_ALWAYS_ELIGIBLE_KEYS = ("tiktok_style",)
+
+
 def _pick_filler_type_for_gap(used_type_ids_this_week):
-    """Prefer a filler type not already used this week; among those, prefer
-    whichever hasn't been scheduled in the longest time, for variety."""
+    """Weighted pick across the eligible filler types. Among types not
+    already used this week (for variety), weight the draw so TikTok Style
+    Reel wins far more often than Quick Reel (FILLER_TYPE_WEIGHTS) — see the
+    note above for why TikTok ignores the "not used this week" dedup that
+    still applies to everything else."""
     types = _eligible_autofill_filler_types()
     if not types:
         return None
-    fresh = [t for t in types if t["id"] not in used_type_ids_this_week]
+    fresh = [
+        t for t in types
+        if t["id"] not in used_type_ids_this_week or t["key"] in FILLER_TYPE_ALWAYS_ELIGIBLE_KEYS
+    ]
     pool = fresh or types
-
-    def _last_used(t):
-        row = db.query_one(
-            "SELECT MAX(publish_date) AS d FROM campaigns WHERE primary_content_type_id = ?", (t["id"],)
-        )
-        return row["d"] or ""
-
-    pool.sort(key=_last_used)
-    return pool[0]
+    weights = [FILLER_TYPE_WEIGHTS.get(t["key"], FILLER_TYPE_DEFAULT_WEIGHT) for t in pool]
+    return random.choices(pool, weights=weights, k=1)[0]
 
 
 def _is_posting_weekday(d):
@@ -795,9 +829,9 @@ def _spawn_paired_and_followup_content(campaign_id, ct, publish_date_iso, actor_
             add_output(campaign_id, video_ct["id"], publish_date_iso)
             task_engine.generate_tasks_for_campaign(campaign_id, only_new_output_type=video_ct["id"])
 
-    # Podcast Episode gets 3 Highlight/Question posts per 3-month cycle: one
-    # the same day as the episode, the other two on the 2nd Thursday of each
-    # of the following two months (Part 9).
+    # Podcast Episode (Nov 2026, now monthly — per Jodie) gets at least
+    # PODCAST_HIGHLIGHT_MONTHLY_COUNT Highlight/Question snippets scattered
+    # across random days in the same month that still have room.
     if ct["key"] == "podcast_episode":
         _spawn_podcast_highlight_followups(campaign_id, publish_date_iso, actor_id)
 
@@ -806,16 +840,18 @@ def _spawn_targeted_followups(parent_campaign_id, parent_publish_iso, actor_id=N
     parent_date = date.fromisoformat(parent_publish_iso)
     parent_title = db.query_one("SELECT title FROM campaigns WHERE id = ?", (parent_campaign_id,))["title"]
     # Highlight/Snippet 1 & 2 land on the Monday and Friday of the following
-    # week (offsets +5 and +9 days from a Wednesday anchor); the portrait
-    # "full episode" repost lands the Monday after that — before the next
-    # targeted campaign begins on a 14-day cycle (offset +12; Wed+12 = Mon,
-    # not +11 which lands on the Sunday before it — fixed Sept after Jodie
-    # caught it landing on the wrong day. See scripts/seed.py
-    # _migrate_full_repost_offset for already-scheduled campaigns.)
+    # week (offsets +5 and +9 days from a Wednesday anchor). Nov 2026, per
+    # Jodie: the portrait "full episode" repost (posted to Instagram/TikTok,
+    # so it counts toward the daily target unlike the YouTube original) now
+    # lands in BETWEEN those two, on the Wednesday of that same following
+    # week (offset +7) — was +12 (the Monday of the week after that, i.e.
+    # right before the next targeted campaign), moved per her explicit
+    # "2 snippets... the following week and the full youtube video... in
+    # between those the following week."
     followups = (
         (5, "highlight_1", "Highlight/Snippet 1"),
+        (7, "targeted_full_repost", "Full YouTube — Portrait Repost"),
         (9, "highlight_2", "Highlight/Snippet 2"),
-        (12, "targeted_full_repost", "Full YouTube — Portrait Repost"),
     )
     for offset, type_key, label in followups:
         ct = get_content_type_by_key(type_key)
@@ -839,21 +875,36 @@ def _spawn_targeted_followups(parent_campaign_id, parent_publish_iso, actor_id=N
 
 
 def _spawn_podcast_highlight_followups(parent_campaign_id, parent_publish_iso, actor_id=None):
+    """Nov 2026, per Jodie: Podcast Episode releases monthly now (was every
+    3rd month) and, instead of 3 fixed follow-ups spread across 3 months,
+    PODCAST_HIGHLIGHT_MONTHLY_COUNT snippets get carved out of the SAME
+    month — scattered onto random posting days that still have room (fewer
+    than POSTS_PER_DAY_TARGET counted outputs already), so each one lands as
+    one of that day's real posts rather than overloading an already-full
+    day. These count toward the daily target even though the episode itself
+    doesn't (it's YouTube/Spotify-only)."""
     hl_ct = get_content_type_by_key("podcast_highlight")
     if not hl_ct:
         return
     parent_date = date.fromisoformat(parent_publish_iso)
     parent_title = db.query_one("SELECT title FROM campaigns WHERE id = ?", (parent_campaign_id,))["title"]
 
-    targets = [(parent_date, "same day as the episode")]
-    y, m = parent_date.year, parent_date.month
-    for i in (1, 2):
-        y2, m2 = scheduling.add_months_ym(y, m, i)
-        occ = scheduling.nth_weekday_of_month(y2, m2, 3, 2)  # 2nd Thursday (Thu=3, Mon=0 convention)
-        if occ:
-            targets.append((occ, f"2nd Thursday, {i} month(s) after the episode"))
+    month_start = parent_date.replace(day=1)
+    next_month_y, next_month_m = scheduling.add_months_ym(month_start.year, month_start.month, 1)
+    month_end = date(next_month_y, next_month_m, 1) - timedelta(days=1)
 
-    for idx, (occ_date, note) in enumerate(targets, start=1):
+    counts = _output_counts_by_day(month_start, month_end)
+    candidates = []
+    d = month_start
+    while d <= month_end:
+        if _is_posting_weekday(d) and counts.get(d.isoformat(), 0) < POSTS_PER_DAY_TARGET:
+            candidates.append(d)
+        d += timedelta(days=1)
+
+    random.shuffle(candidates)
+    chosen = sorted(candidates[:PODCAST_HIGHLIGHT_MONTHLY_COUNT])
+
+    for idx, occ_date in enumerate(chosen, start=1):
         follow_date = occ_date.isoformat()
         dep_id = db.execute(
             """INSERT INTO campaigns
@@ -868,7 +919,8 @@ def _spawn_podcast_highlight_followups(parent_campaign_id, parent_publish_iso, a
         task_engine.generate_tasks_for_campaign(dep_id)
         db.execute(
             "INSERT INTO activity_log (campaign_id, actor_id, message) VALUES (?, ?, ?)",
-            (dep_id, actor_id, f"Auto-created — one of 3 highlight/question posts for this podcast cycle ({note})."),
+            (dep_id, actor_id,
+             f"Auto-created — one of {len(chosen)} highlight/question posts scattered across this podcast's month."),
         )
 
 
