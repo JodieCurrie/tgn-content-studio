@@ -318,13 +318,44 @@ function calFilterDefaultVisible(cat, owner) {
   return cat !== "custom" || !owner;
 }
 
+// Nov 2026, per Jodie: team members should land on just their own assigned
+// campaigns/snippets, not the whole posting calendar — admins keep seeing
+// everything unless they opt in. Stored under its own key (not the generic
+// cat/owner map above) since it's a single per-browser toggle, not a set of
+// independent checkboxes.
+const CAL_SCOPE_STORAGE_KEY = "tgn_calendar_scope_mine";
+
+function calFilterScopeDefault() {
+  return !window.TGN_CURRENT_USER_IS_ADMIN;
+}
+
+function loadCalScopeMine() {
+  try {
+    const raw = localStorage.getItem(CAL_SCOPE_STORAGE_KEY);
+    return raw === null ? calFilterScopeDefault() : raw === "true";
+  } catch (e) {
+    return calFilterScopeDefault();
+  }
+}
+
+function saveCalScopeMine(value) {
+  try {
+    localStorage.setItem(CAL_SCOPE_STORAGE_KEY, value ? "true" : "false");
+  } catch (e) { /* private browsing / storage disabled — won't persist */ }
+}
+
 function applyCalendarFilters() {
   const state = loadCalFilterState();
+  const scopeMine = loadCalScopeMine();
+  const myId = window.TGN_CURRENT_USER_ID ? String(window.TGN_CURRENT_USER_ID) : null;
   document.querySelectorAll("[data-filter-cat]").forEach(el => {
     const cat = el.dataset.filterCat;
     const owner = el.dataset.filterOwner;
     const key = calFilterKey(cat, owner);
-    const visible = key in state ? state[key] !== false : calFilterDefaultVisible(cat, owner);
+    let visible = key in state ? state[key] !== false : calFilterDefaultVisible(cat, owner);
+    if (visible && scopeMine && cat === "posting" && myId) {
+      visible = owner === myId;
+    }
     el.classList.toggle("cal-filtered-out", !visible);
   });
 }
@@ -360,11 +391,24 @@ function initCalendarFilterPanel() {
       updateCalFilterBadges();
     });
   });
+  const scopeCheckbox = document.querySelector(".js-cal-filter-scope");
+  if (scopeCheckbox) {
+    scopeCheckbox.checked = loadCalScopeMine();
+    scopeCheckbox.addEventListener("change", () => {
+      saveCalScopeMine(scopeCheckbox.checked);
+      applyCalendarFilters();
+    });
+  }
   const selectAllBtn = document.querySelector(".js-cal-filter-all");
   selectAllBtn && selectAllBtn.addEventListener("click", () => {
     const s = loadCalFilterState();
     checkboxes.forEach(cb => { cb.checked = true; s[calFilterKey(cb.dataset.cat, cb.dataset.owner)] = true; });
     saveCalFilterState(s);
+    // "Select all" is the expand-to-everything escape hatch, so it also
+    // clears "Assigned to me only" — otherwise a team member could tick
+    // every person's custom/deadline boxes and still not see the full
+    // posting calendar.
+    if (scopeCheckbox) { scopeCheckbox.checked = false; saveCalScopeMine(false); }
     applyCalendarFilters();
     updateCalFilterBadges();
   });
