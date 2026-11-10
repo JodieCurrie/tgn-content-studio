@@ -340,6 +340,8 @@ def seed_data():
     _migrate_flat_timeline_update(type_ids)
     _migrate_full_repost_label(type_ids)
     _migrate_full_repost_offset(type_ids)
+    _migrate_full_repost_offset_v2(type_ids)
+    _migrate_dedupe_quarterly_podcast(type_ids)
     _migrate_reinstate_bible_study(type_ids)
     _migrate_write_script_label()
     _seed_opt_in_pipeline_templates(type_ids)
@@ -508,6 +510,90 @@ def _migrate_full_repost_offset(type_ids):
 # Ideas-tab request) — _seed_content_types() only relabels/category-updates
 # an existing row, it never un-archives one, so a leftover archived row from
 # an old install needs this explicit nudge back to active.
+# Nov 2026, per Jodie: the full-episode portrait repost now lands between
+# the two highlight snippets (offset +7, the Wednesday of the week after the
+# targeted campaign) rather than the Monday of the week after THAT (offset
+# +12) — see app/content.py's _spawn_targeted_followups ("2 snippets... the
+# following week and the full youtube video... in between those"). Shift
+# every already-scheduled repost still sitting at the old +12 offset back by
+# 5 days so a pre-fix install's calendar matches the new rhythm without
+# waiting for its next natural occurrence. Safe to re-run: once shifted,
+# dependency_offset_days is 7 and the WHERE clause no longer matches it.
+def _migrate_full_repost_offset_v2(type_ids):
+    ct_id = type_ids.get("targeted_full_repost")
+    if not ct_id:
+        return
+    stale = dbmod.rows_to_list(
+        dbmod.query(
+            "SELECT id, publish_date FROM campaigns WHERE primary_content_type_id = ? AND dependency_offset_days = 12",
+            (ct_id,),
+        )
+    )
+    for c in stale:
+        new_date = (date.fromisoformat(c["publish_date"]) - timedelta(days=5)).isoformat()
+        dbmod.execute(
+            "UPDATE campaigns SET publish_date = ?, dependency_offset_days = 7 WHERE id = ?",
+            (new_date, c["id"]),
+        )
+        dbmod.execute(
+            "UPDATE content_outputs SET publish_date = ? WHERE campaign_id = ?",
+            (new_date, c["id"]),
+        )
+        dbmod.execute(
+            """UPDATE tasks SET due_date = date(due_date, '-5 day')
+               WHERE campaign_id = ? AND status = 'not_started' AND created_from_template = 1""",
+            (c["id"],),
+        )
+
+
+# Nov 2026, per Jodie ("we have the same issue with the duplicated
+# podcast"): Podcast Episode moved from "every 3rd month" to monthly (second
+# Thursday of every month) — see _seed_scheduling_rules. The OLD quarterly
+# rule's cycle phase was anchored to whatever month _upsert_rule last
+# recomputed as "the next valid occurrence from today", which silently
+# shifted every time Admin -> "Sync pipeline & reference data" ran on a
+# different day — so re-running it could start a whole new quarterly cycle
+# on a different 3-month phase without ever removing what the previous
+# phase had already materialized, leaving more than one "Podcast Episode"
+# root campaign in some months. Same root cause as the old Blog Post
+# cadence bug, same fix shape: the new monthly rule can't drift this way
+# (computed fresh from "today" every time, never from a stored anchor), but
+# it doesn't retroactively clean up what the old quarterly rule already
+# left behind. So for any month with more than one root Podcast Episode
+# campaign, keep whichever one actually falls on that month's second
+# Thursday (the date both the old and new rule agree on whenever their
+# cycles happened to overlap) and remove the other(s) — cascading, via
+# delete_campaign's ON DELETE CASCADE, to their own dependent highlight/
+# question follow-ups. Safe to re-run: once a month has only one, nothing
+# matches.
+def _migrate_dedupe_quarterly_podcast(type_ids):
+    ct_id = type_ids.get("podcast_episode")
+    if not ct_id:
+        return
+    roots = dbmod.rows_to_list(
+        dbmod.query(
+            """SELECT id, publish_date FROM campaigns
+               WHERE primary_content_type_id = ? AND depends_on_campaign_id IS NULL
+               ORDER BY publish_date""",
+            (ct_id,),
+        )
+    )
+    by_month = {}
+    for r in roots:
+        d = date.fromisoformat(r["publish_date"])
+        by_month.setdefault((d.year, d.month), []).append(r)
+
+    for (y, m), rows in by_month.items():
+        if len(rows) <= 1:
+            continue
+        canonical = scheduling.nth_weekday_of_month(y, m, 3, 2)  # 2nd Thursday
+        canonical_iso = canonical.isoformat() if canonical else None
+        for r in rows:
+            if r["publish_date"] == canonical_iso:
+                continue
+            content_module.delete_campaign(r["id"])
+
+
 def _migrate_reinstate_bible_study(type_ids):
     ct_id = type_ids.get("bible_study")
     if not ct_id:
@@ -1018,13 +1104,26 @@ def _seed_scheduling_rules(type_ids):
     _upsert_rule("blog", "Blog Post — last Thursday of the month", "monthly_last_weekday", 3,
                  anchor, RULE_HORIZON_WEEKS, "Monthly Blog Post")
 
-    # Podcast Episode — second Thursday of every third month. 3 Highlight/
-    # Question posts per cycle spawn automatically (see
-    # content._spawn_podcast_highlight_followups) — no separate rule needed
-    # for those, they follow the episode.
+    # Podcast Episode — second Thursday of every month (Nov 2026, per Jodie:
+    # was every 3rd month — now monthly). It's YouTube/Spotify-only so it
+    # doesn't count toward the daily posting target itself; at least 10
+    # Highlight/Question snippets spawn automatically, scattered across random
+    # days in the same month that still have room (see
+    # content._spawn_podcast_highlight_followups), and those DO count.
     anchor = _roll_to_next_valid_month(lambda y, m: scheduling.nth_weekday_of_month(y, m, 3, 2), today.year, today.month)
-    _upsert_rule("podcast_episode", "Podcast Episode — every 3rd month (2nd Thursday)", "every_n_months_nth_weekday",
-                 3, anchor, RULE_HORIZON_WEEKS, "Monthly Podcast Episode", nth=2, interval_months=3)
+    _upsert_rule("podcast_episode", "Podcast Episode — second Thursday of the month", "monthly_nth_weekday",
+                 3, anchor, RULE_HORIZON_WEEKS, "Monthly Podcast Episode", nth=2)
+
+    # Scripture Expansion — every Saturday (Nov 2026, per Jodie: she wants
+    # one guaranteed every Saturday, as the anchor for that day's 2 posts;
+    # the other Saturday slot still fills with the usual weighted filler
+    # pick, which the weekly repeat here doesn't interfere with). A plain
+    # 7-day repeat is "biweekly" rule_type with interval_days=7 — see
+    # scheduling._next_occurrence, which walks anchor_date + interval_days
+    # regardless of what the rule's own name implies.
+    anchor = next_weekday(today, 5)  # Saturday
+    _upsert_rule("scripture_expansion", "Scripture Expansion — every Saturday", "biweekly", 5,
+                 anchor, RULE_HORIZON_WEEKS, "Weekly Scripture Expansion", interval_days=7)
 
 
 def _seed_ideas(user_ids):
