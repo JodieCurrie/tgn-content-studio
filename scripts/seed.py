@@ -342,6 +342,7 @@ def seed_data():
     _migrate_full_repost_offset(type_ids)
     _migrate_full_repost_offset_v2(type_ids)
     _migrate_dedupe_quarterly_podcast(type_ids)
+    _migrate_dedupe_stray_testimony(type_ids)
     _migrate_reinstate_bible_study(type_ids)
     _migrate_write_script_label()
     _seed_opt_in_pipeline_templates(type_ids)
@@ -588,6 +589,48 @@ def _migrate_dedupe_quarterly_podcast(type_ids):
             continue
         canonical = scheduling.nth_weekday_of_month(y, m, 3, 2)  # 2nd Thursday
         canonical_iso = canonical.isoformat() if canonical else None
+        for r in rows:
+            if r["publish_date"] == canonical_iso:
+                continue
+            content_module.delete_campaign(r["id"])
+
+
+def _migrate_dedupe_stray_testimony(type_ids):
+    """Nov 2026: the Testimony rule moved from 'last Tuesday' to 'first
+    Tuesday' of the month (see _upsert_rule's docstring), but — same bug
+    class as the podcast/full-repost fixes above — that change never
+    cleaned up occurrences already materialized under the old pattern, so
+    a stray extra Testimony (on the old last-Tuesday date, or whatever
+    stale date an even earlier pattern left behind) has been sitting
+    alongside the correct first-Tuesday one in some months. Deletes any
+    root Testimony campaign whose publish_date isn't that month's first
+    Tuesday, for every month that still has a correct (first-Tuesday) one
+    to fall back on — never deletes the sole Testimony in a month, even if
+    its date looks wrong, so a month that hasn't regenerated yet isn't
+    left with zero."""
+    ct_id = type_ids.get("testimony")
+    if not ct_id:
+        return
+    roots = dbmod.rows_to_list(
+        dbmod.query(
+            """SELECT id, publish_date FROM campaigns
+               WHERE primary_content_type_id = ? AND depends_on_campaign_id IS NULL
+               ORDER BY publish_date""",
+            (ct_id,),
+        )
+    )
+    by_month = {}
+    for r in roots:
+        d = date.fromisoformat(r["publish_date"])
+        by_month.setdefault((d.year, d.month), []).append(r)
+
+    for (y, m), rows in by_month.items():
+        if len(rows) <= 1:
+            continue
+        canonical = scheduling.nth_weekday_of_month(y, m, 1, 1)  # 1st Tuesday
+        canonical_iso = canonical.isoformat() if canonical else None
+        if canonical_iso not in {r["publish_date"] for r in rows}:
+            continue  # none of this month's rows match — leave it, don't guess
         for r in rows:
             if r["publish_date"] == canonical_iso:
                 continue
