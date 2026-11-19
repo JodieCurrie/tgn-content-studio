@@ -64,6 +64,51 @@
     {% endif %}
   </div>
 
+  {% if design_idea and c.primary_type_key != 'custom' %}
+  {# Design review (Nov 2026): see the made design, approve it or send it back
+     with a typed/dictated note, or upload your own finished version. #}
+  {% set d = design_idea %}
+  <div class="panel-section" id="design-review" data-idea-id="{{ d.id }}">
+    <h4>Design</h4>
+    {% if d.design_gen_status == 'generating' %}
+      <div class="page-subtitle">⏳ Generating a new version… reopen this in a minute.</div>
+    {% elif d.design_gen_status == 'failed' %}
+      <div class="flash error">Generation failed{% if d.design_gen_error %}: {{ d.design_gen_error }}{% endif %}</div>
+    {% endif %}
+    {% if d.design_drive_id %}
+      <img src="/post/design/{{ d.id }}" alt="Design" style="max-width:100%; max-height:420px; border-radius:10px; display:block; margin:0 auto 10px;">
+    {% elif d.canva_design_link %}
+      <div class="page-subtitle" style="margin-bottom:10px;">🎨 <a href="{{ d.canva_design_link }}" target="_blank" rel="noopener">Open the design in Canva</a> — to send it to Posting, export the image and upload it below.</div>
+    {% endif %}
+    <div class="page-subtitle" style="margin-bottom:8px;">
+      {% if d.design_approval == 'approved' %}<span style="color:#3E7A57;">✅ Approved{% if d.design_drive_id %} — on the Posting page{% endif %}</span>
+      {% elif d.design_approval == 'changes' %}<span style="color:#8A6416;">✏️ Changes requested: {{ d.design_feedback or '' }}</span>
+      {% elif d.design_approval == 'pending' %}<span style="color:#8A6416;">Waiting for your review</span>{% endif %}
+    </div>
+    {% if can_review_design %}
+    <div class="form-actions" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+      {% if d.design_approval != 'approved' %}<button type="button" class="btn btn-primary js-panel-design-approve" data-idea-id="{{ d.id }}">✅ Approve</button>{% endif %}
+      <button type="button" class="btn btn-outline js-panel-design-changes-toggle">✏️ Needs changes</button>
+    </div>
+    <div class="js-design-changes-box" style="display:none; margin-bottom:12px;">
+      <label class="field-label">What should change? <span class="page-subtitle" style="display:inline;">(type it, or tap the mic and talk)</span></label>
+      <textarea class="field-input js-design-feedback" rows="3" style="width:100%; margin-bottom:8px;" placeholder="e.g. Make the heading bigger and use warmer colours"></textarea>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="btn btn-outline js-design-mic">🎤 Dictate</button>
+        <button type="button" class="btn btn-primary js-panel-design-changes-send" data-idea-id="{{ d.id }}">Send changes</button>
+      </div>
+      <div class="page-subtitle js-design-mic-note" style="margin-top:6px; display:none;"></div>
+    </div>
+    {% endif %}
+    <label class="field-label">Have a finished version? Upload it</label>
+    <input type="file" class="field-input js-design-upload" data-idea-id="{{ d.id }}" accept="image/*" style="width:100%;">
+    {% if can_review_design and openai_enabled %}
+    <button type="button" class="btn btn-sm btn-outline js-design-generate" data-idea-id="{{ d.id }}" style="margin-top:8px;">Generate a new version with ChatGPT</button>
+    {% endif %}
+    <div class="page-subtitle js-design-msg" style="margin-top:8px;"></div>
+  </div>
+  {% endif %}
+
   {% if c.primary_type_key != 'custom' %}
 
   {% if c.shoot_stages %}
