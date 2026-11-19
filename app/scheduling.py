@@ -374,7 +374,7 @@ def apply_drag(campaign_id, new_date_iso, mode, actor_id=None):
 
     if mode is None:
         mode = "only"
-    if c["schedule_origin"] != "rule" and mode not in ("only", "push_all_filler_forward"):
+    if c["schedule_origin"] != "rule" and mode not in ("only", "push_all_filler_forward", "with_dependents"):
         # rule-only modes requested on a non-rule campaign — fall back safely
         mode = "only"
 
