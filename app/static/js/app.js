@@ -592,3 +592,91 @@ document.addEventListener("click", (e) => {
     }).catch(err => alert(err.message));
   }
 });
+
+
+// ---------------------------------------------------------------- design review (Nov 2026)
+// Section inside the calendar side panel: approve, "needs changes" with a
+// typed or dictated note (Web Speech API where the browser has it — Chrome
+// on Android/desktop and Safari do), upload a finished image.
+(function () {
+  function msgFor(el) { return el.closest("#design-review").querySelector(".js-design-msg"); }
+
+  document.addEventListener("click", async (e) => {
+    const t = e.target;
+    if (t.classList.contains("js-panel-design-changes-toggle")) {
+      const box = t.closest("#design-review").querySelector(".js-design-changes-box");
+      box.style.display = box.style.display === "none" ? "" : "none";
+    }
+    if (t.classList.contains("js-panel-design-approve")) {
+      t.disabled = true;
+      try {
+        const r = await tgnFetch(`/api/ideas/${t.dataset.ideaId}/design-approval`, { method: "POST", body: JSON.stringify({ decision: "approved" }) });
+        msgFor(t).textContent = r.message;
+        setTimeout(refreshPipelinePanel, 900);
+      } catch (err) { msgFor(t).textContent = err.message; t.disabled = false; }
+    }
+    if (t.classList.contains("js-panel-design-changes-send")) {
+      const box = t.closest("#design-review");
+      const feedback = box.querySelector(".js-design-feedback").value.trim();
+      t.disabled = true;
+      try {
+        const r = await tgnFetch(`/api/ideas/${t.dataset.ideaId}/design-approval`, { method: "POST", body: JSON.stringify({ decision: "changes", feedback }) });
+        msgFor(t).textContent = r.message;
+        setTimeout(refreshPipelinePanel, 1500);
+      } catch (err) { msgFor(t).textContent = err.message; t.disabled = false; }
+    }
+    if (t.classList.contains("js-design-generate")) {
+      t.disabled = true;
+      try {
+        const r = await tgnFetch(`/api/ideas/${t.dataset.ideaId}/generate-design`, { method: "POST", body: JSON.stringify({}) });
+        msgFor(t).textContent = r.message;
+      } catch (err) { msgFor(t).textContent = err.message; t.disabled = false; }
+    }
+    if (t.classList.contains("js-design-mic")) {
+      const box = t.closest("#design-review");
+      const area = box.querySelector(".js-design-feedback");
+      const note = box.querySelector(".js-design-mic-note");
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      note.style.display = "";
+      if (!SR) { note.textContent = "This browser can't dictate — use the microphone key on your phone's keyboard instead."; return; }
+      if (t._rec) { t._rec.stop(); return; }
+      const rec = new SR();
+      rec.lang = "en-ZA"; rec.interimResults = true; rec.continuous = true;
+      const base = area.value ? area.value.trim() + " " : "";
+      rec.onresult = (ev) => {
+        let text = "";
+        for (let i = 0; i < ev.results.length; i++) text += ev.results[i][0].transcript;
+        area.value = base + text;
+      };
+      rec.onend = () => { t._rec = null; t.textContent = "🎤 Dictate"; note.textContent = "Done listening — edit if needed, then Send changes."; };
+      rec.onerror = () => { note.textContent = "Couldn't hear that — check the microphone permission and try again."; };
+      t._rec = rec; t.textContent = "⏹ Stop"; note.textContent = "Listening… speak your changes.";
+      rec.start();
+    }
+  });
+
+  document.addEventListener("change", async (e) => {
+    const t = e.target;
+    if (!t.classList || !t.classList.contains("js-design-upload") || !t.files[0]) return;
+    const fd = new FormData(); fd.append("file", t.files[0]);
+    const msg = msgFor(t);
+    msg.textContent = "Uploading…";
+    try {
+      const res = await fetch(`/api/ideas/${t.dataset.ideaId}/design-image`, { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed.");
+      msg.textContent = data.message;
+      setTimeout(refreshPipelinePanel, 1200);
+    } catch (err) { msg.textContent = err.message; }
+  });
+
+  // A design notification opens /calendar?review=<campaign id> — open that
+  // campaign's panel and scroll to its design.
+  const review = new URLSearchParams(window.location.search).get("review");
+  if (review && /^\d+$/.test(review)) {
+    openCampaignPanel(review).then(() => {
+      const el = document.getElementById("design-review");
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+})();

@@ -126,6 +126,33 @@ document.addEventListener("submit", async (e) => {
   }
 });
 
+// Design review (Nov 2026): approve a freshly generated Canva design or flag
+// it as needing changes. Registered before the row-click handlers below so
+// tapping the button never also opens the idea's edit modal.
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest(".js-design-decision");
+  if (!btn) return;
+  e.stopImmediatePropagation();
+  let feedback = "";
+  if (btn.dataset.decision === "changes") {
+    feedback = (prompt("What should change? (You can also open the design on the calendar and dictate it.)") || "").trim();
+    if (!feedback) return;
+  }
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/ideas/${btn.dataset.ideaId}/design-approval`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision: btn.dataset.decision, feedback }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Couldn't save that.");
+    window.location.reload();
+  } catch (err) {
+    alert(err.message);
+    btn.disabled = false;
+  }
+});
+
 document.addEventListener("click", (e) => {
   if (e.target.classList.contains("js-delete-idea")) {
     e.stopPropagation();

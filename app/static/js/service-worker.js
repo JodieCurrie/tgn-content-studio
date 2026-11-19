@@ -37,10 +37,10 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     self.registration.showNotification(payload.title, {
       body: payload.body,
-      icon: "/static/icons/icon-192.png",
-      badge: "/static/icons/badge-96.png",
+      icon: "/static/icons/icon-192.png?v=2026-11b",
+      badge: "/static/icons/badge-96.png?v=2026-11b",
       tag: payload.tag || "tgn-notification",
-      // actions is what puts a real button ("Delay to next best time")
+      // actions is what puts real buttons ("Delay 10 min", "Reschedule")
       // on a reminder notification — only post-due reminders include
       // one (see app/push.py's send_post_reminders). Not supported on
       // iOS Safari: there, tapping the notification just opens the app,
@@ -56,11 +56,16 @@ self.addEventListener("notificationclick", (event) => {
   const outputId = event.notification.data && event.notification.data.output_id;
   event.notification.close();
 
-  if (event.action === "delay" && outputId) {
-    // Snooze this reminder to its next suggested time — no need to open
-    // the app for this, just tell the server and show what happened.
+  const ACTION_ENDPOINTS = {
+    delay: ["/api/push/delay-reminder", "Couldn't delay that reminder."],
+    reschedule: ["/api/push/reschedule-output", "Couldn't reschedule that post."],
+  };
+  if (ACTION_ENDPOINTS[event.action] && outputId) {
+    // "Delay 10 min" / "Reschedule" — no need to open the app, just tell the
+    // server and show what happened.
+    const [endpoint, failText] = ACTION_ENDPOINTS[event.action];
     event.waitUntil(
-      fetch("/api/push/delay-reminder", {
+      fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
@@ -68,19 +73,19 @@ self.addEventListener("notificationclick", (event) => {
       })
         .then((res) => res.json())
         .then((result) => {
-          const message = result.message || (result.ok ? "Delayed." : "Couldn't delay that reminder.");
+          const message = result.message || (result.ok ? "Done." : failText);
           return self.registration.showNotification("TGN Content Studio", {
             body: message,
-            icon: "/static/icons/icon-192.png",
-            badge: "/static/icons/badge-96.png",
+            icon: "/static/icons/icon-192.png?v=2026-11b",
+            badge: "/static/icons/badge-96.png?v=2026-11b",
             tag: event.notification.tag,
             data: { url: targetUrl },
           });
         })
         .catch(() =>
           self.registration.showNotification("TGN Content Studio", {
-            body: "Couldn't reach the server to delay that reminder — try again from the app.",
-            icon: "/static/icons/icon-192.png",
+            body: "Couldn't reach the server — try again from the app.",
+            icon: "/static/icons/icon-192.png?v=2026-11b",
             tag: event.notification.tag,
             data: { url: targetUrl },
           })
