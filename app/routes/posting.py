@@ -11,6 +11,7 @@ from flask import Blueprint, render_template, request, jsonify, g, Response, abo
 from .. import db
 from .. import google_integration as google
 from .. import posting as posting_module
+from .. import content as content_module
 from .. import openai_images
 from ..auth import login_required
 
@@ -337,6 +338,21 @@ def reschedule(output_id):
     if not result.get("ok"):
         return jsonify({"error": result.get("message", "Couldn't reschedule that.")}), 400
     return jsonify(result)
+
+
+@bp.route("/api/admin/even-out", methods=["POST"])
+@login_required
+def admin_even_out():
+    """Re-balances the calendar after bulk moves: two posts a day Mon–Sat,
+    surplus filler slides into thin days, then gaps are refilled."""
+    if not g.user["role_is_admin"]:
+        return _forbidden()
+    today = posting_module.local_today()
+    content_module.even_out_daily_counts(today)
+    content_module.fill_weekly_filler_gaps()
+    content_module.backfill_unscheduled_ideas()
+    content_module.even_out_daily_counts(today)
+    return jsonify({"ok": True})
 
 
 @bp.route("/api/admin/reshuffle", methods=["POST"])
