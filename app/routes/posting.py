@@ -352,8 +352,9 @@ def admin_reshuffle():
         start = date.fromisoformat(data.get("from"))
     except Exception:
         return jsonify({"error": "Give a start date like 2026-11-20."}), 400
+    since = date.fromisoformat(data["since"]) if data.get("since") else None
     if data.get("dry_run", True):
-        res = posting_module.plan_reshuffle(start, assume_posted=data.get("mark_posted") or [])
+        res = posting_module.plan_reshuffle(start, assume_posted=data.get("mark_posted") or [], since=since)
         return jsonify({"dry_run": True, "plan": res["plan"], "blanks_to_delete": len(res["delete_blank_ids"])})
-    res = posting_module.apply_reshuffle(start, mark_posted_ids=data.get("mark_posted") or [], actor_id=g.user["id"])
+    res = posting_module.apply_reshuffle(start, mark_posted_ids=data.get("mark_posted") or [], actor_id=g.user["id"], since=since)
     return jsonify({"dry_run": False, **res})
