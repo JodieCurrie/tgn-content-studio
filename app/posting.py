@@ -661,7 +661,7 @@ def _is_label_blank(row, labels):
     return row["category_key"] == "filler" and not row["source_idea_id"] and row["title"] in labels
 
 
-def plan_reshuffle(start, horizon_days=120, assume_posted=()):
+def plan_reshuffle(start, horizon_days=120, assume_posted=(), since=None):
     """Works out (without changing anything) where every unposted post from
     before `start` should go: soonest free slot from `start`, Monday–Saturday,
     never more than two Instagram/TikTok posts a day, order kept, posts that
@@ -669,7 +669,9 @@ def plan_reshuffle(start, horizon_days=120, assume_posted=()):
     original spacing. Untouched future filler placeholders give way; anything
     with real content or a rule date stays put."""
     labels = {r["label"] for r in db.query("SELECT label FROM content_types")}
-    lookback = start - timedelta(days=60)
+    # `since`: nothing older than this is touched (posts from before the queue
+    # existed were never tracked as posted or not — leave that history alone).
+    lookback = since or (start - timedelta(days=60))
     horizon = start + timedelta(days=horizon_days)
     rows = _campaign_rows_with_counts(lookback, horizon, set(assume_posted))
     by_id = {r["id"]: r for r in rows}
@@ -752,7 +754,7 @@ def _is_posting_weekday_(d):
     return content_module._is_posting_weekday(d)
 
 
-def apply_reshuffle(start, mark_posted_ids=(), actor_id=None):
+def apply_reshuffle(start, mark_posted_ids=(), actor_id=None, since=None):
     """Runs plan_reshuffle for real: marks the given outputs posted, deletes
     the placeholders that give way, moves each backlog campaign (with its
     outputs and task dates), tops any short day back up, lets waiting ideas
@@ -761,7 +763,7 @@ def apply_reshuffle(start, mark_posted_ids=(), actor_id=None):
     for oid in mark_posted_ids:
         if db.query_one("SELECT id FROM content_outputs WHERE id = ?", (oid,)):
             mark_posted(oid)
-    result = plan_reshuffle(start, assume_posted=mark_posted_ids)
+    result = plan_reshuffle(start, assume_posted=mark_posted_ids, since=since)
     for cid in result["delete_blank_ids"]:
         content_module.delete_campaign(cid)
     for p in result["plan"]:
