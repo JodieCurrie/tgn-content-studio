@@ -188,7 +188,9 @@ def _soonest_matching_placeholder_slot(ct):
 # newly-tagged Filler idea should be able to claim the soonest blank Filler
 # slot REGARDLESS of which eligible Filler type that slot happened to land
 # on, not just a slot that already matches the idea's own type exactly.
-def _soonest_blank_filler_slot():
+def _soonest_blank_filler_slot(after_iso=None):
+    # after_iso: only slots strictly later than that date (used when a post
+    # that isn't going out today is rescheduled — see posting.reschedule_output).
     types = _eligible_autofill_filler_types()
     if not types:
         return None
@@ -199,8 +201,9 @@ def _soonest_blank_filler_slot():
         f"""SELECT id, title, publish_date, primary_content_type_id FROM campaigns
             WHERE primary_content_type_id IN ({placeholder}) AND source_idea_id IS NULL
               AND schedule_origin = 'manual' AND publish_date >= ?
+              AND (? IS NULL OR publish_date > ?)
             ORDER BY publish_date ASC""",
-        (*type_ids, date.today().isoformat()),
+        (*type_ids, date.today().isoformat(), after_iso, after_iso),
     ))
     for row in rows:
         # Only a still-blank slot (title never touched from its type's own
@@ -1217,3 +1220,64 @@ def add_comment(campaign_id, author_id, body):
         "INSERT INTO comments (campaign_id, author_id, body) VALUES (?, ?, ?)",
         (campaign_id, author_id, body),
     )
+
+
+# Nov 2026, per Jodie: when a missed campaign pair moves a week, the whole
+# calendar has to re-flow to keep two counted posts on EVERY posting day
+# (Mon-Sat), not just enough posting days per week — the week-level
+# rebalancer above leaves one day at 3 and its neighbour at 1. This is the
+# day-level pass: surplus Filler posts (blank placeholders first, then
+# idea-carrying ones that have no final video yet) slide to the nearest day
+# still short, then anything still short is topped up with new filler.
+def even_out_daily_counts(today=None, horizon_days=371):
+    today = today or date.today()
+    end = today + timedelta(days=horizon_days)
+    counts = _output_counts_by_day(today, end)
+    posting_days = [
+        today + timedelta(days=i) for i in range(horizon_days + 1)
+        if _is_posting_weekday(today + timedelta(days=i))
+    ]
+    deficit_days = []
+    for d in posting_days:
+        for _ in range(max(0, POSTS_PER_DAY_TARGET - counts.get(d.isoformat(), 0))):
+            deficit_days.append(d)
+
+    blank_titles = {r["label"] for r in db.query("SELECT label FROM content_types")}
+    moved = 0
+    for d in posting_days:
+        iso = d.isoformat()
+        surplus = counts.get(iso, 0) - POSTS_PER_DAY_TARGET
+        if surplus <= 0:
+            continue
+        movable = db.rows_to_list(db.query(
+            f"""SELECT c.id, c.title,
+                       (SELECT COUNT(DISTINCT o.id) FROM content_outputs o
+                         JOIN output_platforms op ON op.output_id = o.id
+                         JOIN platforms p ON p.id = op.platform_id
+                        WHERE o.campaign_id = c.id AND p.key IN ({_COUNTED_PLATFORM_PLACEHOLDERS})) AS n_counted
+                FROM campaigns c
+                JOIN content_types ct ON ct.id = c.primary_content_type_id
+                WHERE ct.category_key = 'filler' AND c.publish_date = ? AND c.depends_on_campaign_id IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM content_outputs o2 WHERE o2.campaign_id = c.id
+                                  AND (o2.final_media_drive_id IS NOT NULL OR o2.posted_at IS NOT NULL))
+                ORDER BY (c.title IN ({','.join('?' * len(blank_titles))})) DESC, c.id DESC""",
+            (*COUNTED_PLATFORM_KEYS, iso, *blank_titles),
+        ))
+        for camp in movable:
+            if surplus <= 0 or not deficit_days:
+                break
+            if not camp["n_counted"] or camp["n_counted"] > surplus:
+                continue
+            target = min(deficit_days, key=lambda x: (abs((x - d).days), x))
+            if target == d:
+                continue
+            scheduling.move_campaign_to_date(camp["id"], target.isoformat())
+            for _ in range(camp["n_counted"]):
+                if target in deficit_days:
+                    deficit_days.remove(target)
+            counts[iso] = counts.get(iso, 0) - camp["n_counted"]
+            counts[target.isoformat()] = counts.get(target.isoformat(), 0) + camp["n_counted"]
+            surplus -= camp["n_counted"]
+            moved += 1
+    created = fill_weekly_filler_gaps(today)
+    return {"moved": moved, "created": len(created)}

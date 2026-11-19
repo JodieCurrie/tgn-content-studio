@@ -113,6 +113,37 @@ _COLUMN_MIGRATIONS = [
     # before with no backfill needed. See app/routes/calendar.py
     # _custom_events / app/static/js/calendar.js renderCustomEventBars.
     ("content_outputs", "end_date", "TEXT"),
+    # Final-video posting queue (Nov 2026, per Jodie): the finished video
+    # (or image) for each scheduled post lives in Google Drive (uploaded
+    # straight from her phone's browser — see app/posting.py), plus the
+    # caption she approves, the cover image for YouTube, and a clear
+    # posted/not-posted record so "what have I actually posted?" always has
+    # an answer. approval_status: 'none' (nothing uploaded yet) ->
+    # 'awaiting' (uploaded, waiting for her OK) -> 'approved'; posted_at is
+    # set once she confirms it actually went out.
+    ("content_outputs", "final_media_drive_id", "TEXT"),
+    ("content_outputs", "final_media_name", "TEXT"),
+    ("content_outputs", "final_media_mime", "TEXT"),
+    ("content_outputs", "final_uploaded_at", "TEXT"),
+    ("content_outputs", "post_caption", "TEXT"),
+    ("content_outputs", "cover_drive_id", "TEXT"),
+    ("content_outputs", "approval_status", "TEXT NOT NULL DEFAULT 'none'"),
+    ("content_outputs", "approved_at", "TEXT"),
+    ("content_outputs", "posted_at", "TEXT"),
+    ("content_outputs", "reschedule_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("content_outputs", "original_publish_date", "TEXT"),
+    # Design review for Canva-generated posts: 'none' until a design is
+    # ready, then 'pending' (waiting on Jodie) -> 'approved' | 'changes'.
+    ("content_ideas", "design_approval", "TEXT NOT NULL DEFAULT 'none'"),
+    # Designs built outside Canva (ChatGPT etc.), uploaded straight to the
+    # shared Drive, plus the change-request text from "Needs changes".
+    ("content_ideas", "design_drive_id", "TEXT"),
+    ("content_ideas", "design_mime", "TEXT"),
+    ("content_ideas", "design_feedback", "TEXT"),
+    ("content_ideas", "design_gen_status", "TEXT NOT NULL DEFAULT 'none'"),
+    ("content_ideas", "design_gen_error", "TEXT"),
+    # How a post goes out: reel / post / carousel / story / youtube.
+    ("content_outputs", "post_format", "TEXT"),
 ]
 
 

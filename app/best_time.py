@@ -23,22 +23,22 @@ Each platform now carries a short ORDERED LIST of candidate windows
 """
 
 # key -> ordered list of (hour 0-23, minute, one-line reason), earliest-first
+# Nov 2026, per Jodie: her own experience is that the two best South African
+# windows for short-form posts are early morning and evening (6:30-8:30pm),
+# so Instagram/TikTok/Facebook/Shorts use those instead of the generic
+# guidance below — the first post of a day goes at 12:16pm, the second at
+# 8:14pm (see app/posting.py's slot_time_for). "Delay" on a reminder just
+# pushes it 10 minutes (see push.delay_reminder).
+_SA_SHORT_FORM_TIMES = [
+    (12, 16, "Lunchtime is your first posting window of the day."),
+    (20, 14, "Evening is your second posting window — people are settled and scrolling."),
+]
+
+# key -> ordered list of (hour 0-23, minute, one-line reason), earliest-first
 PLATFORM_BEST_TIMES = {
-    "instagram": [
-        (11, 0, "Late morning tends to catch the most scroll time."),
-        (13, 0, "Early afternoon is a solid secondary window."),
-        (19, 0, "Evening catches the after-work scroll too."),
-    ],
-    "tiktok": [
-        (12, 0, "Midday lunch-break scroll is a good secondary window."),
-        (19, 0, "Evening is TikTok's biggest engagement window."),
-        (21, 0, "Late evening catches night-owl scrolling."),
-    ],
-    "facebook": [
-        (9, 0, "Morning catches people checking Facebook before work."),
-        (13, 0, "Early afternoon is Facebook's typical peak."),
-        (20, 0, "Evening is a secondary peak once people are home."),
-    ],
+    "instagram": list(_SA_SHORT_FORM_TIMES),
+    "tiktok": list(_SA_SHORT_FORM_TIMES),
+    "facebook": list(_SA_SHORT_FORM_TIMES),
     "threads": [
         (11, 0, "Same late-morning window as Instagram."),
         (19, 0, "Evening is a secondary window, mirroring Instagram's."),
@@ -47,10 +47,7 @@ PLATFORM_BEST_TIMES = {
         (15, 0, "Afternoon, ahead of the evening viewing rush."),
         (19, 0, "Evening catches the prime-time viewing window."),
     ],
-    "youtube_shorts": [
-        (12, 0, "Midday catches the lunch-break scroll."),
-        (18, 0, "Early evening is a secondary peak."),
-    ],
+    "youtube_shorts": list(_SA_SHORT_FORM_TIMES),
     "website": [
         (9, 0, "Morning, when blog traffic tends to peak."),
         (13, 0, "Early afternoon is a secondary traffic bump."),

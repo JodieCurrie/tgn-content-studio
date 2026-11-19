@@ -360,3 +360,70 @@ def _share_drive_file(file_id, email, access_token):
             pass
     except urllib.error.HTTPError:
         pass  # non-fatal — file still uploaded even if one share invite fails
+
+
+# ---------------------------------------------------------------------------
+# Final-video posting queue (Nov 2026) — big phone videos can't go through
+# this app's own web server (25MB request cap, small free-tier memory), so
+# the browser uploads them straight to Drive instead: the server only
+# starts a "resumable upload session" (below) and hands the browser that
+# session's one-time URL, then the browser sends the file to Google in
+# chunks itself. Setting an Origin header when starting the session is what
+# makes Google allow those browser-side requests (CORS).
+# ---------------------------------------------------------------------------
+def start_resumable_upload(filename, mime_type, size_bytes, origin, folder_id=None):
+    access_token = get_valid_access_token()
+    metadata = {"name": filename}
+    if folder_id:
+        metadata["parents"] = [folder_id]
+    url = f"{DRIVE_UPLOAD_API}/files?uploadType=resumable&fields=id,name,mimeType,size"
+    req = urllib.request.Request(url, data=json.dumps(metadata).encode("utf-8"), method="POST")
+    req.add_header("Authorization", f"Bearer {access_token}")
+    req.add_header("Content-Type", "application/json; charset=UTF-8")
+    req.add_header("X-Upload-Content-Type", mime_type or "application/octet-stream")
+    if size_bytes:
+        req.add_header("X-Upload-Content-Length", str(int(size_bytes)))
+    if origin:
+        req.add_header("Origin", origin)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            session_url = resp.headers.get("Location")
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Couldn't start the Drive upload ({e.code}): {e.read().decode('utf-8', errors='replace')}") from e
+    if not session_url:
+        raise RuntimeError("Google Drive didn't return an upload address.")
+    return session_url
+
+
+def open_drive_media(file_id, range_header=None):
+    """Opens a Drive file's raw bytes for streaming back out through this
+    app (the in-page video preview and the 'share to Instagram/TikTok'
+    button both read it from here). Returns the live urllib response —
+    the caller streams it and must close it."""
+    access_token = get_valid_access_token()
+    url = f"{DRIVE_API}/files/{file_id}?alt=media"
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("Authorization", f"Bearer {access_token}")
+    if range_header:
+        req.add_header("Range", range_header)
+    try:
+        return urllib.request.urlopen(req, timeout=60)
+    except urllib.error.HTTPError as e:
+        if e.code == 416:
+            raise
+        raise RuntimeError(f"Couldn't read the file from Drive ({e.code}).") from e
+
+
+def find_or_create_named_folder(name, state_key):
+    """One shared Drive folder (e.g. 'TGN Final Videos') — remembered in
+    app_state so every upload after the first reuses it."""
+    row = db.query_one("SELECT value FROM app_state WHERE key = ?", (state_key,))
+    if row and row["value"]:
+        return row["value"]
+    folder = create_drive_folder(name)
+    db.execute(
+        """INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, datetime('now'))
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')""",
+        (state_key, folder["id"]),
+    )
+    return folder["id"]

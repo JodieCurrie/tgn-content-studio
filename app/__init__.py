@@ -40,7 +40,7 @@ def create_app(test_config=None):
     db_module.init_db(app.config["DATABASE_PATH"])
 
     from . import auth
-    from .routes import calendar, content, tasks, dashboard, admin, api, ideas, cron
+    from .routes import calendar, content, tasks, dashboard, admin, api, ideas, cron, posting
 
     app.register_blueprint(auth.bp)
     app.register_blueprint(calendar.bp)
@@ -51,6 +51,7 @@ def create_app(test_config=None):
     app.register_blueprint(api.bp)
     app.register_blueprint(ideas.bp)
     app.register_blueprint(cron.bp)
+    app.register_blueprint(posting.bp)
 
     from . import template_helpers
     template_helpers.register(app)

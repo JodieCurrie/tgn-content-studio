@@ -51,7 +51,11 @@ LOCAL_TIMEZONE_ENV = "LOCAL_TIMEZONE"
 # America/New_York, which put every reminder 6 hours off from her actual
 # clock (a "9am" reminder arriving at 2:50pm SAST instead of 8:50am).
 DEFAULT_TIMEZONE = "Africa/Johannesburg"
-REMINDER_LEAD_MINUTES = 10
+# Nov 2026, per Jodie: the notification fires AT the slot (12:16pm / 8:14pm),
+# not ahead of it. "Delay" pushes it DELAY_MINUTES on.
+REMINDER_LEAD_MINUTES = 0
+DELAY_MINUTES = 10
+LATEST_DELAY_HOUR = 22  # a delay never pushes a reminder past ~10:30pm
 
 
 def local_tz():
@@ -206,6 +210,7 @@ def _outputs_due_today():
            JOIN campaigns c ON c.id = o.campaign_id
            JOIN content_types ct ON ct.id = o.content_type_id
            WHERE o.publish_date = ? AND o.reminder_sent_at IS NULL AND ct.category_key != 'custom'
+             AND o.posted_at IS NULL
            ORDER BY o.sort_order""",
         (today_iso,),
     ))
@@ -238,7 +243,10 @@ def _target_for(output, platform_keys):
     on the way out so it stays stable across sweeps and delay requests."""
     if output.get("reminder_target_time"):
         return _parse_hm(output["reminder_target_time"])
-    hour, minute, _reason = best_time_module.best_time_candidates_for_platforms(platform_keys)[0]
+    # Nov 2026: a day's first Instagram/TikTok post goes out at 12:16pm, its
+    # second at 8:14pm — see posting.slot_time_for.
+    from . import posting as posting_module
+    hour, minute = posting_module.slot_time_for(dict(output, platform_keys=platform_keys))
     db.execute(
         "UPDATE content_outputs SET reminder_target_time = ? WHERE id = ?",
         (_format_hm(hour, minute), output["id"]),
@@ -249,37 +257,60 @@ def _target_for(output, platform_keys):
 def send_post_reminders():
     """What /internal/send-post-reminders calls every few minutes (see
     the README's Render Cron Job setup). For every post publishing today
-    that hasn't been reminded about for its current slot: work out that
-    slot's best time, and — once we're within REMINDER_LEAD_MINUTES of
-    it — push a reminder to whoever it's assigned to (or every admin, if
-    nobody's assigned yet), with a "delay to next best time" action.
+    that hasn't been reminded about for its current slot: once the slot
+    time (12:16pm / 8:14pm, see posting.slot_time_for) arrives, push to
+    whoever it's assigned to (or every admin) —
+      * approved:     "Time to post" (+ Delay 10 min)
+      * needs video / waiting on approval: say what's missing, with
+        Delay 10 min and Reschedule buttons.
+    Empty placeholder slots (no idea yet) get no reminder at all.
     Marks each sent output reminded so a later sweep the same day never
-    repeats it — until a delay clears that flag for the new slot."""
+    repeats it — until a delay clears that flag for the new time."""
     results = []
     now = _local_now()
+    from . import posting as posting_module
+    blank_titles = posting_module._blank_titles()
     for output in _outputs_due_today():
         platform_keys = _platform_keys_for(output["default_platform_ids"])
+        # Blog/podcast-only outputs aren't posted from here yet (website and
+        # podcast aren't built) — no reminder for them.
+        if not posting_module._is_postable(platform_keys):
+            continue
+        idea_row = db.query_one("SELECT source_idea_id FROM campaigns WHERE id = ?", (output["campaign_id"],))
+        probe = dict(output, source_idea_id=idea_row["source_idea_id"] if idea_row else None)
+        if posting_module._is_blank(probe, blank_titles):
+            continue  # an empty slot has nothing to post — it just waits for an idea
         hour, minute = _target_for(output, platform_keys)
         notify_at = now.replace(hour=hour, minute=minute, second=0, microsecond=0) - timedelta(minutes=REMINDER_LEAD_MINUTES)
         if now < notify_at:
             continue  # not time yet — its target is set, but too early to notify
-        reason = best_time_module.reason_for(hour, minute, platform_keys)
         time_label = best_time_module.format_time_label(hour, minute)
         display_title = output["title"] or output["campaign_title"]
-        title = f"Coming up: {display_title}"
-        body = (
-            f"{output['type_label']} — best time to post is {time_label}, "
-            f"about {REMINDER_LEAD_MINUTES} minutes from now. {reason}"
-        )
+        state = posting_module.state_of(output)
+        actions = [{"action": "delay", "title": f"Delay {DELAY_MINUTES} min"}]
+        if state == "needs_video":
+            title = f"No final video yet: {display_title}"
+            body = (
+                f"{output['type_label']} is due now ({time_label}) but nothing's been uploaded. "
+                f"Upload it, delay 10 minutes, or reschedule it."
+            )
+            target_url = f"/post/upload?output={output['id']}"
+            actions.append({"action": "reschedule", "title": "Reschedule"})
+        elif state == "awaiting":
+            title = f"Waiting for approval: {display_title}"
+            body = f"{output['type_label']} was due at {time_label} — it needs an admin's OK before it can post."
+            target_url = f"/post/{output['id']}"
+            actions.append({"action": "reschedule", "title": "Reschedule"})
+        else:
+            title = f"Time to post: {display_title}"
+            body = f"{output['type_label']} is ready — tap to share it ({time_label})."
+            target_url = f"/post/{output['id']}"
         recipient_ids = [output["assigned_user_id"]] if output["assigned_user_id"] else _admin_user_ids()
         sent = send_to_users(
             recipient_ids, title, body,
-            url=f"/calendar/list?campaign={output['campaign_id']}",
+            url=target_url,
             tag=f"tgn-post-{output['id']}",
-            extra={
-                "output_id": output["id"],
-                "actions": [{"action": "delay", "title": "Delay to next best time"}],
-            },
+            extra={"output_id": output["id"], "actions": actions},
         )
         db.execute(
             "UPDATE content_outputs SET reminder_sent_at = ? WHERE id = ?",
@@ -293,34 +324,20 @@ def send_post_reminders():
 
 
 def delay_reminder(output_id):
-    """Called from /api/push/delay-reminder when someone taps "delay to
-    next best time" on a reminder notification. Advances that output's
-    recommended slot to the next candidate window (across its assigned
-    platforms) later today, and clears reminder_sent_at so the sweep
-    reminds about it again ~10 minutes before the new slot. Returns a
-    small dict the service worker turns into a confirmation notification."""
+    """Called from /api/push/delay-reminder when someone taps "Delay 10 min"
+    on a reminder notification: the reminder fires again DELAY_MINUTES from
+    now (never past about 10:30pm — after that, reschedule instead). Clears
+    reminder_sent_at so the sweep sends it again at the new time."""
     output = _output_by_id(output_id)
     if not output:
         return {"ok": False, "message": "Couldn't find that post — it may have been moved or deleted."}
-    platform_keys = _platform_keys_for(output["default_platform_ids"])
-    if output.get("reminder_target_time"):
-        current_hour, current_minute = _parse_hm(output["reminder_target_time"])
-    else:
-        current_hour, current_minute, _reason = best_time_module.best_time_candidates_for_platforms(platform_keys)[0]
-    nxt = best_time_module.next_candidate_after(current_hour, current_minute, platform_keys)
-    if not nxt:
-        return {
-            "ok": False,
-            "message": "That was the last suggested time for today — no later window to delay to.",
-        }
-    hour, minute, reason = nxt
+    new_time = _local_now() + timedelta(minutes=DELAY_MINUTES)
+    if new_time.hour > LATEST_DELAY_HOUR or (new_time.hour == LATEST_DELAY_HOUR and new_time.minute > 30):
+        return {"ok": False, "message": "Too late to delay again today — use Reschedule to move it."}
+    hour, minute = new_time.hour, new_time.minute
     db.execute(
         "UPDATE content_outputs SET reminder_target_time = ?, reminder_sent_at = NULL WHERE id = ?",
         (_format_hm(hour, minute), output_id),
     )
     time_label = best_time_module.format_time_label(hour, minute)
-    return {
-        "ok": True,
-        "new_time": time_label,
-        "message": f"Delayed — next suggested time is {time_label}. {reason}",
-    }
+    return {"ok": True, "new_time": time_label, "message": f"Delayed — I'll remind you again at {time_label}."}
