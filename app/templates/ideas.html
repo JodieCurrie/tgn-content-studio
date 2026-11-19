@@ -52,14 +52,19 @@
 <div class="card">
   {% if ideas %}
     {% for i in ideas %}
-    <div class="list-row js-open-idea" style="cursor:pointer;" data-idea-id="{{ i.id }}">
+    <div class="list-row js-open-idea" id="idea-{{ i.id }}" style="cursor:pointer;" data-idea-id="{{ i.id }}">
       <div style="flex:1;">
         <strong>{{ i.title }}</strong>
         {% if i.type_label %}<span class="pill" style="margin-left:6px; background:{{ i.type_color }}33;">{{ i.type_label }}</span>{% else %}<span class="page-subtitle">· untagged</span>{% endif %}
         {% if i.notes %}<div class="page-subtitle" style="margin:0;">{{ i.notes }}</div>{% endif %}
         {% if i.links %}<div class="page-subtitle" style="margin:0;">🔗 {{ i.links.splitlines()|length }} link(s)</div>{% endif %}
         {% if i.canva_status == 'pending' %}<div class="page-subtitle" style="margin:0;">🎨 Design generating — check back shortly</div>
-        {% elif i.canva_status == 'ready' %}<div class="page-subtitle" style="margin:0;">🎨 <a href="{{ i.canva_design_link }}" target="_blank" rel="noopener" onclick="event.stopPropagation();">Open Canva design</a></div>
+        {% elif i.canva_status == 'ready' %}<div class="page-subtitle" style="margin:0;">🎨 <a href="{{ i.canva_design_link }}" target="_blank" rel="noopener" onclick="event.stopPropagation();">Open Canva design</a>
+          {% if i.design_approval == 'approved' %} · <span style="color:#3E7A57;">✅ approved</span>
+          {% elif i.design_approval == 'changes' %} · <span style="color:#8A6416;">✏️ changes needed — edit in Canva, then approve</span>{% endif %}
+          {% if current_user.role_is_admin and i.design_approval != 'approved' %}
+          <span style="margin-left:8px;"><button type="button" class="btn btn-sm btn-primary js-design-decision" data-idea-id="{{ i.id }}" data-decision="approved">Approve design</button>
+          <button type="button" class="btn btn-sm btn-outline js-design-decision" data-idea-id="{{ i.id }}" data-decision="changes">Needs changes</button></span>{% endif %}</div>
         {% elif i.canva_status == 'failed' %}<div class="page-subtitle" style="margin:0;">🎨 Design generation had a problem — open the idea to check</div>{% endif %}
       </div>
       {% if current_user.role_is_admin %}
@@ -77,11 +82,16 @@
 <div class="section-title">Recently scheduled from ideas</div>
 <div class="card">
   {% for s in scheduled %}
-  <div class="list-row js-open-idea" style="cursor:pointer;" data-idea-id="{{ s.id }}">
+  <div class="list-row js-open-idea" id="idea-{{ s.id }}" style="cursor:pointer;" data-idea-id="{{ s.id }}">
     <div style="flex:1;"><strong>{{ s.title }}</strong> → {{ s.campaign_title }}
       <div class="page-subtitle" style="margin:0;">{{ s.publish_date|friendly_date_long }}</div>
       {% if s.canva_status == 'pending' %}<div class="page-subtitle" style="margin:0;">🎨 Design generating — check back shortly</div>
-      {% elif s.canva_status == 'ready' %}<div class="page-subtitle" style="margin:0;">🎨 <a href="{{ s.canva_design_link }}" target="_blank" rel="noopener" onclick="event.stopPropagation();">Open Canva design</a></div>
+      {% elif s.canva_status == 'ready' %}<div class="page-subtitle" style="margin:0;">🎨 <a href="{{ s.canva_design_link }}" target="_blank" rel="noopener" onclick="event.stopPropagation();">Open Canva design</a>
+          {% if s.design_approval == 'approved' %} · <span style="color:#3E7A57;">✅ approved</span>
+          {% elif s.design_approval == 'changes' %} · <span style="color:#8A6416;">✏️ changes needed — edit in Canva, then approve</span>{% endif %}
+          {% if current_user.role_is_admin and s.design_approval != 'approved' %}
+          <span style="margin-left:8px;"><button type="button" class="btn btn-sm btn-primary js-design-decision" data-idea-id="{{ s.id }}" data-decision="approved">Approve design</button>
+          <button type="button" class="btn btn-sm btn-outline js-design-decision" data-idea-id="{{ s.id }}" data-decision="changes">Needs changes</button></span>{% endif %}</div>
       {% elif s.canva_status == 'failed' %}<div class="page-subtitle" style="margin:0;">🎨 Design generation had a problem — open the idea to check</div>{% endif %}
     </div>
     <button type="button" class="btn btn-sm btn-ghost js-delete-idea" data-idea-id="{{ s.id }}" data-idea-scheduled="1" title="Delete this idea">✕</button>

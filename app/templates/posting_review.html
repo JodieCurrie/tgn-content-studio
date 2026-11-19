@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Review post — TGN Content Studio{% endblock %}
+{% block content %}
+<style>
+  .pill-needs_video { background:#FBE7E9; color:#A5424F; }
+  .pill-awaiting { background:#FFF1D6; color:#8A6416; }
+  .pill-approved { background:#E7F3EC; color:#3E7A57; }
+  .pill-posted { background:var(--surface-alt); color:var(--text-muted); }
+  .plat-check { display:inline-flex; align-items:center; gap:6px; margin:0 14px 8px 0; font-size:13.5px; }
+  .post-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+  .post-actions .btn { min-height:44px; }
+</style>
+<div class="page-header">
+  <div>
+    <h1 class="page-title">{{ o.display_title }}</h1>
+    <div class="page-subtitle">{{ o.type_label }} · {{ o.publish_date|friendly_date_long }} at {{ slot_label }} <span class="pill pill-{{ o.state }}" style="margin-left:6px;">{{ o.state_label }}</span> <span class="pill" style="margin-left:4px; background:var(--surface-alt);">{{ o.format_label }}</span></div>
+  </div>
+  <a class="btn btn-outline" href="{{ url_for('posting.queue') }}">← Posting</a>
+</div>
+
+{% if not o.final_media_drive_id %}
+<div class="card card-pad">
+  <p style="margin-top:0;">No final video has been uploaded for this one yet.</p>
+  <div class="post-actions">
+    <a class="btn btn-primary" href="{{ url_for('posting.upload_page', output=o.id) }}">Upload it now</a>
+    {% if can_approve %}<button class="btn btn-outline js-reschedule" data-output-id="{{ o.id }}">Reschedule</button>{% endif %}
+  </div>
+  <div id="review-error" class="flash error" style="display:none; margin-top:10px;"></div>
+</div>
+{% else %}
+<div class="card card-pad" id="review-card" data-output-id="{{ o.id }}" data-state="{{ o.state }}" data-media-url="{{ url_for('posting.media', output_id=o.id) }}" data-media-name="{{ o.final_media_name or 'post' }}" data-media-mime="{{ o.final_media_mime or '' }}">
+  <div style="text-align:center; margin-bottom:14px;">
+    {% if is_image %}
+    <img src="{{ url_for('posting.media', output_id=o.id) }}" alt="Final post" style="max-width:100%; max-height:60vh; border-radius:10px;">
+    {% else %}
+    <video src="{{ url_for('posting.media', output_id=o.id) }}" controls playsinline preload="metadata" style="max-width:100%; max-height:60vh; border-radius:10px; background:#000;"></video>
+    {% endif %}
+    {% if o.cover_drive_id %}<div class="page-subtitle" style="margin-top:8px;">Cover image attached ✓ <a href="{{ url_for('posting.cover', output_id=o.id) }}" target="_blank" rel="noopener">view</a></div>{% endif %}
+    {% if can_approve and 'youtube' in o.platform_keys %}
+    <div class="post-actions" style="justify-content:center;">
+      <label class="btn btn-sm btn-outline" style="cursor:pointer;">{{ 'Replace cover' if o.cover_drive_id else 'Add cover image' }}<input type="file" id="review-cover-file" accept="image/*" hidden></label>
+      {% if openai_enabled %}<button type="button" class="btn btn-sm btn-outline" id="btn-gen-cover">Generate a cover</button>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <label class="field-label" style="display:flex; justify-content:space-between; align-items:center;">
+    <span>Caption <span class="page-subtitle" style="display:inline;">(edit freely — saves as you type)</span></span>
+    {% if can_approve %}<button type="button" class="btn btn-sm btn-outline" id="btn-suggest">✨ Suggest a caption</button>{% endif %}
+  </label>
+  <textarea class="field-input" id="review-caption" rows="5" style="width:100%; margin-bottom:12px;" {{ 'disabled' if not can_approve }}>{{ o.post_caption or '' }}</textarea>
+
+  <label class="field-label">Posting as</label>
+  <select class="field-select" id="review-format" style="margin-bottom:8px;" {{ 'disabled' if not can_approve }}>
+    {% for k, label in formats.items() %}<option value="{{ k }}" {{ 'selected' if o.format == k }}>{{ label }}</option>{% endfor %}
+  </select>
+  {% if format_hints %}
+  <div class="page-subtitle" style="margin-bottom:12px;">
+    {% for h in format_hints %}{{ h }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+  </div>
+  {% endif %}
+
+  <label class="field-label">Posting to</label>
+  <div id="review-platforms" style="margin-bottom:8px;">
+    {% for p in platforms %}
+    <label class="plat-check"><input type="checkbox" value="{{ p.id }}" data-key="{{ p.key }}" {{ 'checked' if p.id in chosen }} {{ 'disabled' if not can_approve }}> {{ p.label }}</label>
+    {% endfor %}
+  </div>
+
+  <div id="review-error" class="flash error" style="display:none;"></div>
+
+  <div id="review-posted-banner" class="flash success" style="display:none; margin-top:12px;">
+    Marked as posted ✓ <button class="btn btn-sm btn-ghost" id="btn-undo-posted" type="button">Undo</button>
+  </div>
+
+  {% if can_approve %}
+    {% if o.state == 'awaiting' %}
+    <div class="post-actions">
+      <button class="btn btn-primary" id="btn-approve">✅ Approve</button>
+      <a class="btn btn-outline" href="{{ url_for('posting.upload_page', output=o.id) }}">Replace the video</a>
+      <button class="btn btn-outline js-reschedule" data-output-id="{{ o.id }}">Reschedule</button>
+    </div>
+    {% elif o.state in ('approved', 'posted') %}
+    <div class="section-title" style="margin-top:18px;">{{ 'Post it again somewhere else' if o.state == 'posted' else 'Post it' }}</div>
+    <div class="page-subtitle" style="margin-bottom:6px;">Tap “Share” and pick the app — the caption is copied too, so paste it if the app doesn't fill it in. {% if o.state == 'approved' %}It's marked as posted automatically once the share finishes (you can undo).{% endif %}</div>
+    <div class="post-actions">
+      <button class="btn btn-primary" id="btn-share">📲 Share video + caption</button>
+      <button class="btn btn-outline" id="btn-copy">Copy caption</button>
+      <a class="btn btn-outline" href="{{ url_for('posting.media', output_id=o.id, download=1) }}">Download video</a>
+    </div>
+    <div class="post-actions">
+      <a class="btn btn-sm btn-outline" href="https://www.instagram.com/" target="_blank" rel="noopener">Open Instagram</a>
+      <a class="btn btn-sm btn-outline" href="https://www.tiktok.com/upload" target="_blank" rel="noopener">Open TikTok</a>
+      <a class="btn btn-sm btn-outline" href="https://www.facebook.com/" target="_blank" rel="noopener">Open Facebook</a>
+      <a class="btn btn-sm btn-outline" href="https://studio.youtube.com/" target="_blank" rel="noopener">Open YouTube Studio</a>
+    </div>
+    <div class="post-actions" style="margin-top:18px;">
+      {% if o.state == 'approved' %}
+      <button class="btn btn-outline" id="btn-posted">✔️ I've posted it (desktop / posted by hand)</button>
+      <button class="btn btn-ghost" id="btn-unapprove">Back to waiting for approval</button>
+      {% else %}
+      <button class="btn btn-outline" id="btn-unposted">Not actually posted — undo</button>
+      {% endif %}
+    </div>
+    {% endif %}
+  {% else %}
+  <div class="page-subtitle">Only an admin can approve and post.</div>
+  {% endif %}
+</div>
+{% endif %}
+<script src="{{ url_for('static', filename='js/posting.js') }}?v=2026-11c"></script>
+{% endblock %}

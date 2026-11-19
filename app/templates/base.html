@@ -36,6 +36,7 @@
       <a class="nav-link {{ 'active' if request.endpoint == 'calendar.week_view' }}" href="{{ url_for('calendar.week_view') }}">🗓️ Week</a>
       <a class="nav-link {{ 'active' if request.endpoint == 'calendar.list_view' }}" href="{{ url_for('calendar.list_view') }}">📋 List</a>
       <a class="nav-link {{ 'active' if request.endpoint == 'ideas.index' }}" href="{{ url_for('ideas.index') }}">💡 Ideas</a>
+      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('posting.') }}" href="{{ url_for('posting.queue') }}">📤 Posting</a>
       <a class="nav-link {{ 'active' if request.endpoint == 'tasks.my_tasks' }}" href="{{ url_for('tasks.my_tasks') }}">✅ My Tasks</a>
 
       {% if current_user.role_is_admin %}

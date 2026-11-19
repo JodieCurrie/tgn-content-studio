@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Posting — TGN Content Studio{% endblock %}
+{% macro row(o, show_date=False) %}
+<a class="list-row" href="{{ url_for('posting.review', output_id=o.id) if o.state != 'needs_video' else url_for('posting.upload_page', output=o.id) }}" style="text-decoration:none; color:inherit; {{ 'opacity:.7;' if o.is_blank }}">
+  <span class="type-chip" style="background:{{ o.type_color }}55;">{{ o.type_label }}</span>
+  <div style="flex:1; min-width:0;">
+    <strong>{{ o.display_title }}</strong>
+    <div class="page-subtitle" style="margin:0;">
+      {% if show_date %}{{ o.publish_date|friendly_date_long }} · {% endif %}{% for k in o.platform_keys %}{{ k|replace('_',' ')|title }}{% if not loop.last %}, {% endif %}{% endfor %}
+      · {{ o.format_label }}{% if o.reschedule_count %} · moved {{ o.reschedule_count }}×{% endif %}
+    </div>
+  </div>
+  {% if can_approve and o.state in ('needs_video', 'awaiting') and not o.is_blank %}<button type="button" class="btn btn-sm btn-outline js-reschedule" data-output-id="{{ o.id }}">Reschedule</button>{% endif %}
+  <span class="pill {{ 'pill-' ~ o.state }}">{{ o.state_label }}</span>
+</a>
+{% endmacro %}
+{% block content %}
+<style>
+  .pill-needs_video { background:#FBE7E9; color:#A5424F; }
+  .pill-awaiting { background:#FFF1D6; color:#8A6416; }
+  .pill-approved { background:#E7F3EC; color:#3E7A57; }
+  .pill-posted { background:var(--surface-alt); color:var(--text-muted); }
+  .post-day-label { font-size:12px; font-weight:700; color:var(--text-muted); margin:14px 2px 6px; text-transform:uppercase; letter-spacing:.04em; }
+</style>
+<div class="page-header">
+  <div>
+    <h1 class="page-title">📤 Posting</h1>
+    <div class="page-subtitle">Upload the finished video, approve it when your phone nudges you, tap to post. Two posts a day — 12:16pm and 8:14pm. Your own uploads are approved automatically.</div>
+  </div>
+  <a class="btn btn-primary" href="{{ url_for('posting.upload_page') }}">+ Upload final video</a>
+</div>
+
+{% if not google_connected %}
+<div class="flash error" style="margin-bottom:14px;">Google Drive isn't connected yet, so videos can't be uploaded. An admin can connect it under Admin → Integrations.</div>
+{% endif %}
+
+{% if needs_attention %}
+<div class="section-title">Needs you — next 2 days</div>
+<div class="card">{% for o in needs_attention %}{{ row(o, True) }}{% endfor %}</div>
+{% endif %}
+
+{% if unconfirmed %}
+<div class="section-title">Did these go out?</div>
+<div class="card">
+  {% for o in unconfirmed %}
+  <div class="list-row">
+    <span class="type-chip" style="background:{{ o.type_color }}55;">{{ o.type_label }}</span>
+    <div style="flex:1;"><strong>{{ o.display_title }}</strong>
+      <div class="page-subtitle" style="margin:0;">Approved for {{ o.publish_date|friendly_date_long }} — not confirmed as posted</div>
+    </div>
+    {% if can_approve %}<button class="btn btn-sm btn-primary js-mark-posted" data-output-id="{{ o.id }}">Yes, posted</button>{% endif %}
+    <a class="btn btn-sm btn-outline" href="{{ url_for('posting.review', output_id=o.id) }}">Open</a>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="section-title">Coming up — next 14 days</div>
+{% if days %}
+  {% for d, items in days.items() %}
+  <div class="post-day-label">{{ d|friendly_date_long }}{% if d == today %} · today{% endif %}</div>
+  <div class="card">{% for o in items %}{{ row(o) }}{% endfor %}</div>
+  {% endfor %}
+{% else %}
+  <div class="card"><div class="empty-state">Nothing scheduled in the next two weeks.</div></div>
+{% endif %}
+
+{% if recent_posted %}
+<div class="section-title">Recently posted</div>
+<div class="card">{% for o in recent_posted %}{{ row(o, True) }}{% endfor %}</div>
+{% endif %}
+<script src="{{ url_for('static', filename='js/posting.js') }}?v=2026-11c"></script>
+{% endblock %}

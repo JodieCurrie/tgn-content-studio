@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Upload final video — TGN Content Studio{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">⬆️ Upload final video</h1>
+    <div class="page-subtitle">Pick which scheduled post it is, choose the finished video (or image), and add the caption. Works from your phone's camera roll or from your computer — same page. If you upload it yourself it's approved automatically.</div>
+  </div>
+  <a class="btn btn-outline" href="{{ url_for('posting.queue') }}">← Posting</a>
+</div>
+
+{% if not google_connected %}
+<div class="flash error" style="margin-bottom:14px;">Google Drive isn't connected yet — an admin needs to connect it under Admin → Integrations before uploads will work.</div>
+{% endif %}
+
+<div class="card card-pad">
+  <form id="upload-form">
+    <label class="field-label">What is this? <span class="page-subtitle" style="display:inline;">(from the content calendar — ones still missing a video are first)</span></label>
+    <select class="field-select" id="upload-output" style="margin-bottom:12px; width:100%;" required>
+      <option value="">Choose the scheduled post…</option>
+      {% for o in outputs %}
+      <option value="{{ o.id }}" data-platforms="{{ o.platform_keys|join(',') }}" data-caption="{{ o.post_caption or '' }}" data-format="{{ o.format }}" data-blank="{{ 1 if o.is_blank else 0 }}" {{ 'selected' if selected == o.id }}>
+        {{ o.publish_date|friendly_date_long }} — {{ o.type_label }}: {{ o.display_title }}{% if o.state != 'needs_video' %} (has a video — will replace it){% endif %}
+      </option>
+      {% endfor %}
+    </select>
+
+    <label class="field-label">Final video or image</label>
+    <input class="field-input" type="file" id="upload-file" accept="video/*,image/*" style="margin-bottom:12px; width:100%;" required>
+
+    <div id="cover-wrap" style="display:none; margin-bottom:12px;">
+      <label class="field-label">Cover / thumbnail <span class="page-subtitle" style="display:inline;">(needed for YouTube)</span></label>
+      <input class="field-input" type="file" id="upload-cover" accept="image/*" style="width:100%;">
+    </div>
+
+    <label class="field-label">Posting as</label>
+    <select class="field-select" id="upload-format" style="margin-bottom:12px; width:100%;">
+      {% for k, label in formats.items() %}<option value="{{ k }}">{{ label }}</option>{% endfor %}
+    </select>
+
+    <label class="field-label" style="display:flex; justify-content:space-between; align-items:center;">
+      <span>Caption <span class="page-subtitle" style="display:inline;">(a suggestion is filled in — edit freely)</span></span>
+      <button type="button" class="btn btn-sm btn-outline" id="btn-suggest-caption">✨ Suggest a caption</button>
+    </label>
+    <textarea class="field-input" id="upload-caption" rows="5" placeholder="Pick the post above and a suggested caption appears here." style="margin-bottom:12px; width:100%;"></textarea>
+
+    <div id="upload-progress" style="display:none; margin-bottom:12px;">
+      <div style="height:10px; border-radius:999px; background:var(--surface-alt); overflow:hidden;"><div id="upload-bar" style="height:100%; width:0; background:var(--primary, #E9824D); transition:width .2s;"></div></div>
+      <div class="page-subtitle" id="upload-status" style="margin-top:6px;">Starting…</div>
+    </div>
+    <div id="upload-error" class="flash error" style="display:none; margin-bottom:10px;"></div>
+    <button class="btn btn-primary" type="submit" id="upload-submit" {{ 'disabled' if not google_connected }}>Upload</button>
+    <div class="page-subtitle" style="margin-top:8px;">Keep this screen open until it says done — big videos take a minute or two.</div>
+  </form>
+</div>
+<script src="{{ url_for('static', filename='js/posting.js') }}?v=2026-11c"></script>
+{% endblock %}
