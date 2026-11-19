@@ -553,9 +553,27 @@ def campaign_panel(campaign_id):
     users = db.rows_to_list(db.query("SELECT id, name FROM users WHERE active = 1 ORDER BY name"))
     content_types = db.rows_to_list(db.query("SELECT * FROM content_types WHERE archived = 0 ORDER BY sort_order"))
     platforms = db.rows_to_list(db.query("SELECT * FROM platforms ORDER BY sort_order"))
+    # Design review (Nov 2026): the idea behind this post, if it has a design
+    # to look at — shown as its own section so a design notification can open
+    # straight onto it (/calendar?review=<campaign id>).
+    idea = db.row_to_dict(db.query_one(
+        """SELECT * FROM content_ideas WHERE scheduled_campaign_id = ? OR id = ? ORDER BY id LIMIT 1""",
+        (campaign_id, campaign.get("source_idea_id") or -1),
+    ))
+    # A post type that takes a design shows the section even before one
+    # exists, so a design built elsewhere (ChatGPT…) can be uploaded straight
+    # onto it.
+    from .. import canva_ideas as canva_ideas_module
+    if idea and not canva_ideas_module.is_canva_eligible_type(campaign.get("primary_type_key")) and not (
+        idea.get("canva_design_link") or idea.get("design_drive_id")
+    ):
+        idea = None
+    from .. import openai_images
     return render_template(
         "partials/campaign_panel.html", c=campaign, users=users,
         content_types=content_types, platforms=platforms,
+        design_idea=idea, openai_enabled=openai_images.configured(),
+        can_review_design=bool(g.user["role_is_admin"] or g.user["role_can_manage_all_content"]),
     )
 
 

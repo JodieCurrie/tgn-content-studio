@@ -13,6 +13,8 @@ from .. import task_engine
 from .. import analytics
 from .. import pipeline
 from .. import push as push_module
+from .. import posting as posting_module
+from .. import openai_images
 from .. import canva_ideas as canva_ideas_module
 
 bp = Blueprint("api", __name__, url_prefix="/api")
@@ -626,6 +628,12 @@ def update_idea(idea_id):
         db.execute("UPDATE content_ideas SET scheduled_campaign_id = NULL WHERE id = ?", (idea_id,))
     fresh_idea = db.row_to_dict(db.query_one("SELECT * FROM content_ideas WHERE id = ?", (idea_id,)))
 
+    # Nov 2026, per Jodie: a freshly generated design should ping her phone
+    # so she can approve it or ask for changes, rather than waiting for her
+    # to notice it on the Ideas page.
+    if fields.get("canva_status") == "ready" and idea.get("canva_status") != "ready":
+        posting_module.notify_design_ready(fresh_idea)
+
     if retyping:
         # NOW re-place it — into another open matching slot under its NEW
         # type right away if one's free, otherwise it sits in Unscheduled to
@@ -648,6 +656,110 @@ def update_idea(idea_id):
     elif "content_type_id" in fields and fields["content_type_id"]:
         content_module._backfill_idea_into_placeholder_slot(fresh_idea)
     return jsonify({"ok": True})
+
+
+@bp.route("/ideas/<int:idea_id>/design-approval", methods=["POST"])
+@login_required
+def design_approval(idea_id):
+    """Approve a design, or ask for changes (with a typed or dictated note).
+    Approving a design that exists as a file also puts it straight on the
+    Posting page as the final media of its scheduled post. 'Needs changes'
+    regenerates it when image generation is switched on (OPENAI_API_KEY);
+    otherwise the note is saved on the idea for whoever redoes it."""
+    forbidden = _admin_only()
+    if forbidden:
+        return forbidden
+    data = request.get_json(force=True)
+    decision = (data.get("decision") or "").strip()
+    feedback = (data.get("feedback") or "").strip()
+    if decision not in ("approved", "changes"):
+        return jsonify({"error": "Unknown decision."}), 400
+    if not db.query_one("SELECT id FROM content_ideas WHERE id = ?", (idea_id,)):
+        return jsonify({"error": "Not found"}), 404
+    if decision == "changes" and not feedback:
+        return jsonify({"error": "Tell me what to change first — type it or tap the mic."}), 400
+    db.execute(
+        "UPDATE content_ideas SET design_approval = ?, design_feedback = ? WHERE id = ?",
+        (decision, feedback or None, idea_id),
+    )
+    message = "Saved."
+    if decision == "approved":
+        attached = posting_module.attach_design(idea_id)
+        if attached:
+            message = "Approved — it's on the Posting page, ready to post."
+        else:
+            row = db.row_to_dict(db.query_one(
+                "SELECT design_drive_id, scheduled_campaign_id FROM content_ideas WHERE id = ?", (idea_id,)))
+            if not row["design_drive_id"]:
+                message = "Approved. To send it to the Posting page, upload the finished image on this design."
+            elif not row["scheduled_campaign_id"]:
+                message = "Approved. It'll go to the Posting page once the idea has a calendar slot."
+    elif openai_images.configured():
+        openai_images.generate_design_async(idea_id, feedback)
+        message = "Got it — redesigning now. You'll get a notification when the new version is ready."
+    else:
+        message = "Saved your notes. Upload a revised image when it's ready, or I'll redo it for you in a session."
+    return jsonify({"ok": True, "message": message})
+
+
+@bp.route("/ideas/<int:idea_id>/design-image", methods=["POST"])
+@login_required
+def design_image_upload(idea_id):
+    """Upload a finished design image (e.g. built in ChatGPT). An admin's own
+    upload is approved on the spot and goes straight to Posting; anyone
+    else's waits for an admin."""
+    idea = db.row_to_dict(db.query_one("SELECT * FROM content_ideas WHERE id = ?", (idea_id,)))
+    if not idea:
+        return jsonify({"error": "Not found"}), 404
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "Choose an image first."}), 400
+    mime = file.mimetype or "image/png"
+    if not mime.startswith("image/"):
+        return jsonify({"error": "That needs to be an image (PNG or JPG)."}), 400
+    import os, tempfile
+    from .. import google_integration as google
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        file.save(tmp.name)
+        path = tmp.name
+    try:
+        folder_id = google.find_or_create_named_folder(posting_module.FINAL_FOLDER_NAME, posting_module.FINAL_FOLDER_STATE_KEY)
+        result = google.upload_file_to_drive(path, f"design-idea-{idea_id}-{file.filename}", mime, folder_id=folder_id)
+    except google.GoogleNotConnected as e:
+        return jsonify({"error": str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 502
+    finally:
+        os.unlink(path)
+    is_admin = bool(g.user["role_is_admin"] or g.user["role_can_manage_all_content"])
+    db.execute(
+        """UPDATE content_ideas SET design_drive_id = ?, design_mime = ?, design_approval = ?, design_feedback = NULL
+           WHERE id = ?""",
+        (result["id"], mime, "approved" if is_admin else "pending", idea_id),
+    )
+    attached = posting_module.attach_design(idea_id) if is_admin else None
+    if not is_admin:
+        posting_module.notify_design_ready(idea)
+    return jsonify({
+        "ok": True,
+        "message": ("Uploaded and approved — it's on the Posting page." if attached
+                    else "Uploaded and approved." if is_admin else "Uploaded — waiting for approval."),
+    })
+
+
+@bp.route("/ideas/<int:idea_id>/generate-design", methods=["POST"])
+@login_required
+def design_generate(idea_id):
+    forbidden = _admin_only()
+    if forbidden:
+        return forbidden
+    if not openai_images.configured():
+        return jsonify({"error": "Image generation isn't switched on — add OPENAI_API_KEY in Render first."}), 400
+    if not db.query_one("SELECT id FROM content_ideas WHERE id = ?", (idea_id,)):
+        return jsonify({"error": "Not found"}), 404
+    feedback = ((request.get_json(silent=True) or {}).get("feedback") or "").strip()
+    openai_images.generate_design_async(idea_id, feedback)
+    return jsonify({"ok": True, "message": "Generating — you'll get a notification when it's ready."})
 
 
 @bp.route("/ideas/<int:idea_id>", methods=["DELETE"])
@@ -771,4 +883,18 @@ def push_delay_reminder():
     if not output_id:
         return jsonify({"ok": False, "message": "Missing output_id."}), 400
     result = push_module.delay_reminder(output_id)
+    return jsonify(result)
+
+
+@bp.route("/push/reschedule-output", methods=["POST"])
+@login_required
+def push_reschedule_output():
+    """The notification's "Reschedule" button (via the service worker):
+    same move as the Reschedule button on the Posting page."""
+    if not (g.user["role_is_admin"] or g.user["role_can_manage_all_content"]):
+        return jsonify({"ok": False, "message": "Only an admin can reschedule posts."}), 403
+    output_id = (request.get_json(force=True) or {}).get("output_id")
+    if not output_id:
+        return jsonify({"ok": False, "message": "Missing output_id."}), 400
+    result = posting_module.reschedule_output(output_id, actor_id=g.user["id"])
     return jsonify(result)

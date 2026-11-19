@@ -15,6 +15,7 @@ import os
 from flask import Blueprint, request, jsonify
 
 from .. import push as push_module
+from .. import posting as posting_module
 
 bp = Blueprint("cron", __name__, url_prefix="/internal")
 
@@ -32,4 +33,11 @@ def send_post_reminders():
     if not _authorized():
         return jsonify({"error": "Not authorized."}), 403
     results = push_module.send_post_reminders()
-    return jsonify({"ok": True, "reminders_sent": len(results), "results": results})
+    # Nov 2026: same sweep also moves posts nobody approved/posted in time
+    # (silently — no notification) to the next slot (see app/posting.py's reschedule_missed).
+    rescheduled = posting_module.reschedule_missed()
+    posting_module.attach_approved_designs()
+    return jsonify({
+        "ok": True, "reminders_sent": len(results), "results": results,
+        "moved": len(rescheduled["moved"]), "flagged": len(rescheduled["flagged"]),
+    })
